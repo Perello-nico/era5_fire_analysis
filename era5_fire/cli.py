@@ -96,7 +96,7 @@ def save(fig, base, formats):
 
 
 def plot(c):
-    from .plotting import meteogram, maps, plt
+    from .plotting import interactive_maps, meteogram, maps, plt
     dest = c["output"] / "figures"
     dest.mkdir(parents=True, exist_ok=True)
     for kind, builder, filename in [("point", meteogram, "meteogram"), ("maps", maps, "maps")]:
@@ -109,6 +109,10 @@ def plot(c):
             save(fig, dest / filename, c["formats"])
         finally:
             plt.close(fig)
+
+        if kind == "maps" and c.get("maps", {}).get("interactive", True):
+            html_path = interactive_maps(ds, c, dest / "maps_interactive.html")
+            print(f"Interactive maps: {html_path}")
 
 
 def main():

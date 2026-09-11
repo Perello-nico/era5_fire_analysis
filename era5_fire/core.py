@@ -52,6 +52,21 @@ def load_config(path):
         step = m.get("every_hours", 6)
         if not isinstance(step, int) or isinstance(step, bool) or step < 1:
             raise ValueError("maps.every_hours must be a positive integer")
+
+        # Generate a self-contained HTML time-slider viewer by default.
+        interactive = m.setdefault("interactive", True)
+        if not isinstance(interactive, bool):
+            raise ValueError("maps.interactive must be true or false")
+
+        interactive_dpi = m.setdefault("interactive_dpi", 110)
+        if (not isinstance(interactive_dpi, int) or isinstance(interactive_dpi, bool)
+                or not 60 <= interactive_dpi <= 240):
+            raise ValueError("maps.interactive_dpi must be an integer between 60 and 240")
+
+        interactive_interval = m.setdefault("interactive_interval_ms", 900)
+        if (not isinstance(interactive_interval, int) or isinstance(interactive_interval, bool)
+                or interactive_interval < 100):
+            raise ValueError("maps.interactive_interval_ms must be an integer >= 100")
         c["map_times"] = (pd.DatetimeIndex([timestamp(t) for t in m["times"]])
                           if "times" in m else pd.date_range(c["start"], c["end"], freq=f"{step}h"))
         if len(c["map_times"]) == 0 or any((c["map_times"] < c["start"]) | (c["map_times"] > c["end"])):
@@ -92,18 +107,31 @@ def plans(c):
 def normalize(ds):
     if "valid_time" in ds.dims:
         ds = ds.rename({"valid_time": "time"})
+    # ERA5 / ERA5T expver handling
     if "expver" in ds.dims:
         versions = list(ds.expver.values)
-        versions.sort(key=lambda v: (str(v) not in ("1", "0001"), str(v)))
+        # Prefer final ERA5 (expver=1) over ERA5T (expver=5)
+        versions.sort(
+            key=lambda v: (str(v) not in ("1", "0001"), str(v))
+        )
         merged = ds.sel(expver=versions[0], drop=True)
         for v in versions[1:]:
-            merged = merged.combine_first(ds.sel(expver=v, drop=True))
+            other = ds.sel(expver=v, drop=True)
+            merged = merged.combine_first(other)
+
         ds = merged
+    # expver may instead be just a scalar coordinate.
+    # Once the data have been selected, we don't need this metadata
+    # for subsequent concatenation across days.
+    if "expver" in ds.coords:
+        ds = ds.drop_vars("expver")
     for name in ("number", "surface"):
         if name in ds.dims and ds.sizes[name] == 1:
             ds = ds.squeeze(name, drop=True)
     if "longitude" in ds.coords:
-        ds = ds.assign_coords(longitude=(ds.longitude + 180) % 360 - 180).sortby("longitude")
+        ds = ds.assign_coords(
+            longitude=(ds.longitude + 180) % 360 - 180
+        ).sortby("longitude")
     return ds.sortby("time")
 
 

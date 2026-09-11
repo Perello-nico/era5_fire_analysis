@@ -177,3 +177,4 @@ pyrightconfig.json
 # Downloaded weather data and generated plots
 output/
 .cdsapirc
+configs/*.yaml
