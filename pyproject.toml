@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "era5-fire-analysis"
+version = "0.1.0"
+description = "Configurable ERA5 downloads, meteograms and weather maps"
+requires-python = ">=3.10"
+dependencies = ["cdsapi>=0.7.7", "numpy", "pandas", "xarray", "netCDF4", "matplotlib", "PyYAML", "cartopy"]
+
+[project.optional-dependencies]
+test = ["pytest"]
+
+[project.scripts]
+era5-fire = "era5_fire.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["era5_fire*"]

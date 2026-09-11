@@ -1,0 +1,23 @@
+# All input timestamps are UTC. End is inclusive. Example only: replace as needed.
+start: "2023-07-24T00:00:00Z"
+end: "2023-07-26T23:00:00Z"
+point:
+  name: Palermo
+  latitude: 38.12
+  longitude: 13.36
+# Bounding box in degrees, longitude in [-180, 180].
+region:
+  north: 39.0
+  west: 11.0
+  south: 36.0
+  east: 16.0
+# both, point, or maps
+mode: both
+maps:
+  every_hours: 6
+  # Alternatively provide exact UTC timestamps within start/end:
+  # times: ["2023-07-24T12:00:00Z", "2023-07-25T15:00:00Z"]
+  coastlines: true  # First use may download Cartopy Natural Earth data.
+timezone: Europe/Rome
+output: ../output/palermo  # Relative to this configuration file.
+formats: [png, pdf]
