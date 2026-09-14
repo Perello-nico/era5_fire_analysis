@@ -442,7 +442,10 @@ def maps(ds, c, times=None, cities=None):
             transform=projection,
             length=4.5, linewidth=.5,
             barb_increments={"half": 5, "full": 10, "flag": 50},
-            flip_barb=lat < 0,
+            # Matplotlib flattens U/V internally.  Flatten flip_barb as well,
+            # otherwise a one-row grid (shape 1 x N) can be misinterpreted as
+            # a single value and fail during NumPy broadcasting.
+            flip_barb=(lat < 0).ravel(),
             zorder=7,
         )
 
@@ -569,6 +572,48 @@ def topography(c, region=None, title=None, overlay=False):
     fig.subplots_adjust(bottom=.16)
     ax.imshow(colors, extent=extent, origin="upper", transform=projection)
     ax.set_extent(extent, crs=projection)
+
+    # Use the same geographic context as the weather maps.
+    maps_config = c.get("maps", {})
+    if maps_config.get("coastlines", True):
+        ax.coastlines(resolution="10m", linewidth=.8, color="black", zorder=8)
+    if maps_config.get("borders", True):
+        import cartopy.feature as cfeature
+        ax.add_feature(
+            cfeature.BORDERS.with_scale("10m"),
+            linewidth=.55, edgecolor="black", zorder=8,
+        )
+    if maps_config.get("lakes", True):
+        import cartopy.feature as cfeature
+        ax.add_feature(
+            cfeature.LAKES.with_scale("10m"),
+            facecolor="none", edgecolor="0.3", linewidth=.45, zorder=8,
+        )
+
+    # Cities use the same Natural Earth source/filtering as the weather maps.
+    topo_region = {
+        "west": west, "east": east, "south": south, "north": north,
+    }
+    cities = _load_map_cities(topo_region, maps_config)
+    for _, city_name, city_lon, city_lat in cities:
+        ax.plot(
+            city_lon, city_lat,
+            marker="o", markersize=2.2, color="black",
+            transform=projection, zorder=12,
+        )
+        ax.text(
+            city_lon, city_lat, f"  {city_name}",
+            transform=projection,
+            fontsize=7, color="black",
+            ha="left", va="center", zorder=12,
+            bbox={
+                "facecolor": "white",
+                "alpha": .6,
+                "edgecolor": "none",
+                "pad": .5,
+            },
+        )
+
     gl = ax.gridlines(draw_labels=True, linewidth=.5, alpha=.3)
     gl.top_labels = gl.right_labels = False
 
