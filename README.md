@@ -15,8 +15,8 @@ Use `uv sync` if you do not need the test dependencies. Run commands with `uv ru
 without activating the environment:
 
 ```bash
-uv run era5-fire plan --config configs/example.yaml
-uv run era5-fire run --config configs/example.yaml
+uv run era5-fire plan --config example/example.yaml
+uv run era5-fire run --config example/example.yaml
 ```
 
 Credentials still belong in `~/.cdsapirc`, as described below.
@@ -38,21 +38,21 @@ key: YOUR_PERSONAL_ACCESS_TOKEN
 
 ## Configure and run
 
-Edit `configs/example.yaml` to set dates, location, region and map times. Palermo is only an example.
+Edit `example/example.yaml` to set dates, location, region and map times. Palermo is only an example. This is also the default configuration when `--config` is omitted (run from the project directory). Its `output: output` setting writes results to `example/output/`.
 
 ```bash
 # Inspect exact requests without network access or credentials.
-era5-fire plan --config configs/example.yaml
+era5-fire plan --config example/example.yaml
 # Download, process and plot.
-era5-fire run --config configs/example.yaml
+era5-fire run --config example/example.yaml
 ```
 
 Stages can also run separately:
 
 ```bash
-era5-fire download --config configs/example.yaml
-era5-fire process --config configs/example.yaml
-era5-fire plot --config configs/example.yaml
+era5-fire download --config example/example.yaml
+era5-fire process --config example/example.yaml
+era5-fire plot --config example/example.yaml
 ```
 
 - `mode`: `point`, `maps`, or `both`. Point mode needs no region; maps mode needs no point.
@@ -81,7 +81,7 @@ Precipitation boundaries are 0.5, 2, 4, 10, 25, 50, 100 and 250 mm, using the su
 To regenerate figures from processed data containing those hourly values:
 
 ```bash
-uv run era5-fire plot --config configs/example.yaml
+uv run era5-fire plot --config example/example.yaml
 ```
 
 Cartopy may download Natural Earth coastlines on first use. Set `maps.coastlines: false` to avoid this dependency. Processing loads each stream into memory; split large domains or long periods into separate configurations.
@@ -100,10 +100,10 @@ References: [ERA5 documentation](https://confluence.ecmwf.int/spaces/CKB/pages/7
 
 ## Tests
 
-With uv (after `uv sync --extra test`):
+Run from the project directory. With uv, include the test dependencies:
 
 ```bash
-uv run pytest -q
+uv run --extra test pytest -q
 ```
 
 Or with the pip environment activated:
@@ -112,4 +112,10 @@ Or with the pip environment activated:
 pytest -q
 ```
 
-Synthetic tests cover humidity, cardinal wind directions, precipitation timing, requests across month boundaries, split NetCDF archives, CSV/NetCDF exports and map/meteogram rendering without coastline downloads. No CDS credentials are needed for tests.
+Validate the relocated example and inspect its download requests without downloading data or needing CDS credentials:
+
+```bash
+uv run era5-fire plan --config example/example.yaml
+```
+
+The automated tests create temporary configurations and outputs; they do not download or modify the example data. Synthetic tests cover humidity, cardinal wind directions, precipitation timing, requests across month boundaries, split NetCDF archives, CSV/NetCDF exports and map/meteogram rendering without coastline downloads. No CDS credentials are needed for tests.

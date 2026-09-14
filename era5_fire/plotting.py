@@ -111,11 +111,11 @@ def meteogram(ds, c, highlight_time=None):
     accumulated_rain = axes[2].twinx()
     accumulated_rain.plot(
         times, ds.precipitation.cumsum("time", skipna=False),
-        color="#b51ff0", lw=2, label="Accumulated precipitation",
+        color="#0000ff", lw=2, label="Accumulated precipitation",
     )
     accumulated_rain.set(ylabel="Accumulated (mm)", ylim=(0, None))
-    accumulated_rain.tick_params(axis="y", colors="#b51ff0")
-    accumulated_rain.yaxis.label.set_color("#b51ff0")
+    accumulated_rain.tick_params(axis="y", colors="#0000ff")
+    accumulated_rain.yaxis.label.set_color("#0000ff")
 
     days = pd.date_range(
         times[0].normalize() - pd.DateOffset(days=1),
@@ -166,7 +166,7 @@ def meteogram(ds, c, highlight_time=None):
 
     p = c["point"]
     fig.suptitle(
-        f"{p.get('name', 'Location')} - ERA5\n"
+        f"{p.get('name', 'Location')} - ERA5 weather\n"
         f"Requested {p['latitude']:.3f}, {p['longitude']:.3f}; "
         f"grid {float(ds.latitude):.3f}, {float(ds.longitude):.3f}",
         y=.98,
@@ -381,7 +381,7 @@ def maps(ds, c, times=None, cities=None):
             if p is not None:
                 ax.plot(
                     point_lon, point_lat,
-                    marker="X", markersize=5.5,
+                    marker="D", markersize=5.5,
                     markerfacecolor="black", markeredgecolor="white",
                     markeredgewidth=.8,
                     transform=projection, zorder=10,
@@ -465,7 +465,7 @@ def interactive_maps(ds, c, output_path):
 
     The map sequence is rendered with the same Matplotlib/Cartopy ``maps``
     function used for static output. A single meteogram PNG is embedded above
-    the maps. JavaScript moves a vertical line across that meteogram whenever
+    the time controls and maps. JavaScript moves a vertical line across that meteogram whenever
     the map slider changes. No web server is required.
     """
     from pathlib import Path
@@ -681,11 +681,7 @@ def interactive_maps(ds, c, output_path):
     <div id="meteogram-content"></div>
   </section>
 
-  <section class="panel" aria-label="Interactive ERA5 map viewer">
-    <div class="panel-heading"><h2>Spatial fields</h2></div>
-    <div class="map-wrap">
-      <img id="map-image" alt="ERA5 temperature, relative humidity and wind maps">
-    </div>
+  <section id="time-controls-panel" class="panel" aria-label="Time controls">
     <div class="controls">
       <div class="time-row">
         <div>
@@ -708,6 +704,16 @@ def interactive_maps(ds, c, output_path):
       </div>
     </div>
   </section>
+
+  <section class="panel" aria-label="Interactive ERA5 map viewer">
+    <div class="panel-heading"><h2>Spatial fields</h2></div>
+    <div class="map-wrap">
+      <img id="map-image" alt="ERA5 temperature, relative humidity, wind and accumulated precipitation maps">
+    </div>
+  </section>
+
+
+
 </main>
 <script>
 const frames = __FRAMES__;

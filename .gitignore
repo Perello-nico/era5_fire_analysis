@@ -176,5 +176,3 @@ pyrightconfig.json
 # End of https://www.toptal.com/developers/gitignore/api/python
 # Downloaded weather data and generated plots
 output/
-.cdsapirc
-configs/*.yaml

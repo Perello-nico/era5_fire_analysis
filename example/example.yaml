@@ -14,7 +14,7 @@ region:
 # both, point, or maps
 mode: both
 maps:
-  every_hours: 6
+  every_hours: 1
   # Alternatively provide exact UTC timestamps within start/end:
   # times: ["2023-07-24T12:00:00Z", "2023-07-25T15:00:00Z"]
   coastlines: True  # First use may download Cartopy Natural Earth data.
@@ -25,5 +25,5 @@ maps:
   interactive_interval_ms: 900
   interactive_meteogram: True
 timezone: Europe/Rome
-output: ../output/example # Relative to this configuration file.
+output: output # Relative to this configuration file.
 formats: [png, pdf]

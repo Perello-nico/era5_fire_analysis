@@ -119,7 +119,7 @@ def plot(c):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=["plan", "download", "process", "plot", "run"])
-    parser.add_argument("--config", default="configs/example.yaml")
+    parser.add_argument("--config", default="example/example.yaml")
     args = parser.parse_args()
     try:
         c = load_config(args.config)
