@@ -73,6 +73,8 @@ def meteogram(ds, c, highlight_time=None):
     rh.plot(times, ds.relative_humidity, color="#0c53e0", lw=2, ls=":",
             label="Relative humidity")
     rh.set(ylabel="%", ylim=(0, 100))
+    rh.tick_params(axis="y", colors="#0c53e0")
+    rh.yaxis.label.set_color("#0c53e0")
     axes[0].set(ylabel="°C", title="Temperature and relative humidity")
     axes[0].margins(y=.15)
 
@@ -379,13 +381,20 @@ def maps(ds, c, times=None, cities=None):
 
             # location inspected in the meteogram.
             if p is not None:
-                ax.plot(
+                point_marker, = ax.plot(
                     point_lon, point_lat,
-                    marker="D", markersize=5.5,
+                    marker="D", markersize=5.5, linestyle="none",
                     markerfacecolor="black", markeredgecolor="white",
                     markeredgewidth=.8,
                     transform=projection, zorder=10,
                 )
+                if row == 0 and col == 0:
+                    fig.legend(
+                        handles=[point_marker], labels=["Meteogram location"],
+                        loc="upper left", bbox_to_anchor=(.01, .995),
+                        frameon=True, facecolor="white", edgecolor="0.8",
+                        fontsize=10,
+                    )
 
             # Optional city labels, filtered to avoid overcrowding.
             for _, city_name, city_lon, city_lat in cities:
