@@ -59,6 +59,7 @@ era5-fire plot --config example/example.yaml
 - `start`, `end`: inclusive UTC timestamps on whole hours. Explicit offsets are accepted. A date without a time means midnight, not the whole day.
 - `point`: name, latitude and longitude; extraction uses the nearest grid cell and records its coordinates.
 - `region`: north, west, south, east in degrees. Longitude uses -180 to 180; split regions crossing the antimeridian.
+- `maps.topography`: enable the separate shaded elevation panel (default `true`). First use downloads Copernicus GLO-90 tiles; subsequent plots reuse `raw/topography/`. Set to `false` to skip terrain downloads and rendering.
 - `maps.every_hours`: interval counted from start. Alternatively `maps.times` supplies exact timestamps and takes precedence.
 - `timezone`: meteogram display timezone; data and map labels remain UTC.
 - `formats`: PNG and/or PDF.
@@ -70,6 +71,7 @@ Point data are downloaded hourly in a small box; regional data hourly between th
 
 - `raw/`: original downloads and JSON request metadata.
 - `point.nc`, `point.csv`: temperature/dewpoint (°C), RH (%), wind/gust (m/s), direction (degrees), precipitation (mm), VPD (kPa), and trailing 24-hour precipitation. CSV timestamps include UTC offsets; NetCDF times are UTC.
+- `figures/topography.png` (and/or PDF): elevation in metres with hillshading and the meteogram location. Also embedded as a static panel below the weather maps in `maps_interactive.html`; the existing meteogram → slider → maps order is preserved.
 - `maps.nc`: hourly processed fields between the first and last selected map timestamps.
 - `figures/meteogram.png` (and/or PDF): three panels styled after `~/Codes/meteogram`: combined temperature/dewpoint and dotted RH on a secondary axis; wind speed/gusts with direction arrows; hourly precipitation bars with a cumulative precipitation line on the right axis (mm), summed from the first available hour. Fixed 18:00–06:00 night shading uses the configured timezone. VPD remains in the data exports but is not plotted.
 - `figures/maps.png` (and/or PDF): one combined figure with a row per selected timestamp and columns for temperature, RH, wind and accumulated precipitation. Four shared discrete colourbars apply to every row. Old individual timestamp figures from earlier runs are not removed automatically.
@@ -119,3 +121,5 @@ uv run era5-fire plan --config example/example.yaml
 ```
 
 The automated tests create temporary configurations and outputs; they do not download or modify the example data. Synthetic tests cover humidity, cardinal wind directions, precipitation timing, requests across month boundaries, split NetCDF archives, CSV/NetCDF exports and map/meteogram rendering without coastline downloads. No CDS credentials are needed for tests.
+
+Topography uses [Copernicus GLO-90](https://registry.opendata.aws/copernicus-dem/), a digital surface model including vegetation and buildings, resampled for display. It does not change the ERA5 grid or weather values. Terrain tiles require internet access on first use; the generated HTML remains self-contained.

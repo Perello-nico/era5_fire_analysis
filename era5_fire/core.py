@@ -49,6 +49,8 @@ def load_config(path):
                 -180 <= r["west"] < r["east"] <= 180):
             raise ValueError("Invalid region; split regions crossing the antimeridian")
         m = c.setdefault("maps", {})
+        if not isinstance(m.setdefault("topography", True), bool):
+            raise ValueError("maps.topography must be true or false")
         step = m.get("every_hours", 6)
         if not isinstance(step, int) or isinstance(step, bool) or step < 1:
             raise ValueError("maps.every_hours must be a positive integer")

@@ -35,12 +35,14 @@ def test_meteorology():
     np.testing.assert_allclose(derive(ds).relative_humidity, 52.54, atol=.1)
 
 
-def test_pipeline(tmp_path):
+def test_pipeline(tmp_path, monkeypatch):
+    monkeypatch.setattr("era5_fire.topography.elevation", lambda c: (
+        np.arange(100, dtype=float).reshape(10, 10), (12, 14, 37, 39)))
     path = tmp_path / "case.yaml"
     path.write_text(yaml.safe_dump({"start": "2023-07-31T12:00Z", "end": "2023-08-01T12:00Z",
         "point": {"latitude": 38.1, "longitude": 13.1},
         "region": {"north": 39, "south": 37, "west": 12, "east": 14},
-        "maps": {"every_hours": 12, "coastlines": False, "cities": False, "borders": False, "lakes": False}, "output": "out"}))
+        "maps": {"every_hours": 12, "topography": True, "coastlines": False, "cities": False, "borders": False, "lakes": False}, "output": "out"}))
     c = load_config(path)
     jobs = plans(c)
     requests = [r for k, r, _ in jobs if k == "point"]
@@ -62,7 +64,10 @@ def test_pipeline(tmp_path):
         assert np.isnan(ds.precipitation_24h.values[22])
         assert ds.precipitation_24h.values[23] == 24
     plot(c)
-    assert len(list((c["output"] / "figures").glob("*.png"))) == 2
+    assert len(list((c["output"] / "figures").glob("*.png"))) == 3
+    html = (c["output"] / "figures" / "maps_interactive.html").read_text()
+    assert 'aria-label="Topography"' in html
+    assert html.index('id="map-image"') < html.index('aria-label="Topography"')
     assert (c["output"] / "point.csv").exists()
 
 
@@ -161,3 +166,29 @@ def test_rain_accumulation():
     assert cmap(norm(.49))[-1] == 0
     assert cmap(norm(.5))[-1] == 1
     assert cmap(norm(250)) == cmap(norm(300))
+
+
+def test_topography_panel(tmp_path, monkeypatch):
+    import rasterio
+    from rasterio.transform import from_bounds
+    from era5_fire.topography import elevation
+    from era5_fire.plotting import topography, plt
+
+    cache = tmp_path / "raw" / "topography"
+    cache.mkdir(parents=True)
+    name = "Copernicus_DSM_COG_30_N44_00_E005_00_DEM"
+    (cache / "tileList.txt").write_text(name + '\n')
+    with rasterio.open(cache / f"{name}.tif", "w", driver="GTiff",
+                       width=10, height=10, count=1, dtype="float32",
+                       crs="EPSG:4326", transform=from_bounds(5, 44, 6, 45, 10, 10)) as dst:
+        dst.write(np.full((10, 10), 750, dtype="float32"), 1)
+    c = {"output": tmp_path, "region": {"west": 5.1, "east": 5.9, "south": 44.1, "north": 44.9},
+         "point": {"longitude": 5.4, "latitude": 44.5}}
+    values, extent = elevation(c)
+    np.testing.assert_allclose(values, 750)
+    assert extent == (5.1, 5.9, 44.1, 44.9)
+    fig = topography(c)
+    fig.savefig(tmp_path / "terrain.png")
+    assert fig.axes[0].get_legend().get_texts()[0].get_text() == "Meteogram location"
+    assert fig.axes[1].get_ylabel() == "Elevation above sea level (m)"
+    plt.close(fig)

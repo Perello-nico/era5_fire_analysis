@@ -14,6 +14,7 @@ region:
 # both, point, or maps
 mode: both
 maps:
+  topography: true  # Separate elevation panel; downloads and caches Copernicus GLO-90.
   every_hours: 1
   # Alternatively provide exact UTC timestamps within start/end:
   # times: ["2023-07-24T12:00:00Z", "2023-07-25T15:00:00Z"]

@@ -469,7 +469,54 @@ def maps(ds, c, times=None, cities=None):
     return fig
 
 
-def interactive_maps(ds, c, output_path):
+def topography(c):
+    """A static elevation panel independent of weather timestamps."""
+    import cartopy.crs as ccrs
+    from matplotlib.colors import LightSource, Normalize
+    from matplotlib.cm import ScalarMappable
+    from .topography import elevation
+
+    values, extent = elevation(c)
+    west, east, south, north = extent
+    finite = values[np.isfinite(values)]
+    if not finite.size:
+        raise ValueError("No valid topography elevations in the requested region")
+    norm = Normalize(min(0, float(finite.min())), max(1, float(finite.max())))
+    cmap = plt.get_cmap("terrain")
+    dx = (east - west) / values.shape[1] * 111_320 * max(.01, np.cos(np.deg2rad((north + south) / 2)))
+    dy = (north - south) / values.shape[0] * 111_320
+    colors = LightSource(azdeg=315, altdeg=45).shade(
+        np.nan_to_num(values), cmap=cmap, norm=norm, dx=dx, dy=dy,
+        blend_mode="soft",
+    )
+    colors[..., 3] = np.isfinite(values)
+    projection = ccrs.PlateCarree()
+    fig, ax = plt.subplots(figsize=(11, 7), subplot_kw={"projection": projection})
+    fig.subplots_adjust(bottom=.16)
+    ax.imshow(colors, extent=extent, origin="upper", transform=projection)
+    ax.set_extent(extent, crs=projection)
+    gl = ax.gridlines(draw_labels=True, linewidth=.5, alpha=.3)
+    gl.top_labels = gl.right_labels = False
+    p = c.get("point")
+    if p is not None:
+        ax.plot(p.get("grid_longitude", p["longitude"]),
+                p.get("grid_latitude", p["latitude"]),
+                marker="D", markersize=6, linestyle="none",
+                markerfacecolor="black", markeredgecolor="white",
+                transform=projection, label="Meteogram location")
+        ax.legend(loc="upper left")
+    ax.set_title("Topography — Copernicus GLO-90")
+    fig.colorbar(ScalarMappable(norm=norm, cmap=cmap), ax=ax, shrink=.8,
+                 label="Elevation above sea level (m)")
+    fig.text(.5, .04,
+             "Copernicus DEM GLO-90 · Display resampled from ~90 m surface elevation\n"
+             "© DLR e.V. 2010–2014 and © Airbus Defence and Space GmbH 2014–2018\n"
+             "Provided under COPERNICUS by the European Union and ESA; all rights reserved.",
+             ha="center", fontsize=7)
+    return fig
+
+
+def interactive_maps(ds, c, output_path, topography_src=None):
     """Create a self-contained HTML viewer synchronized with the meteogram.
 
     The map sequence is rendered with the same Matplotlib/Cartopy ``maps``
@@ -837,7 +884,16 @@ showFrame(0);
 </html>
 """
 
-    document = (document
+    terrain_panel = ""
+    if topography_src is not None:
+        terrain_panel = (
+            '<section class="panel" aria-label="Topography">'
+            '<div class="panel-heading"><h2>Topography</h2></div>'
+            '<img style="display:block;width:min(1050px,100%);margin:auto" '
+            'alt="Shaded elevation map with meteogram location" '
+            f'src="{topography_src}"></section>'
+        )
+    document = (document.replace("</main>", terrain_panel + "\n</main>")
                 .replace("__FRAMES__", frames_json)
                 .replace("__TITLE__", title_json)
                 .replace("__INTERVAL__", str(interval_ms))

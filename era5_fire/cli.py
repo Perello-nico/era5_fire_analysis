@@ -97,7 +97,9 @@ def save(fig, base, formats):
 
 
 def plot(c):
-    from .plotting import interactive_maps, meteogram, maps, plt
+    from .plotting import interactive_maps, meteogram, maps, topography, plt
+    import base64
+    import io
     dest = c["output"] / "figures"
     dest.mkdir(parents=True, exist_ok=True)
     for kind, builder, filename in [("point", meteogram, "meteogram"), ("maps", maps, "maps")]:
@@ -111,8 +113,19 @@ def plot(c):
         finally:
             plt.close(fig)
 
+        topography_src = None
+        if kind == "maps" and c.get("maps", {}).get("topography", True):
+            fig = topography(c)
+            try:
+                save(fig, dest / "topography", c["formats"])
+                buffer = io.BytesIO()
+                fig.savefig(buffer, format="png", dpi=140, facecolor="white")
+                topography_src = "data:image/png;base64," + base64.b64encode(buffer.getvalue()).decode("ascii")
+            finally:
+                plt.close(fig)
+
         if kind == "maps" and c.get("maps", {}).get("interactive", True):
-            html_path = interactive_maps(ds, c, dest / "maps_interactive.html")
+            html_path = interactive_maps(ds, c, dest / "maps_interactive.html", topography_src=topography_src)
             print(f"Interactive maps: {html_path}")
 
 
