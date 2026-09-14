@@ -51,6 +51,41 @@ def load_config(path):
         m = c.setdefault("maps", {})
         if not isinstance(m.setdefault("topography", True), bool):
             raise ValueError("maps.topography must be true or false")
+        if not isinstance(m.setdefault("topography_zoom", True), bool):
+            raise ValueError("maps.topography_zoom must be true or false")
+        zoom_radius = m.setdefault("topography_zoom_radius_km", 20.0)
+        if (not isinstance(zoom_radius, (int, float)) or isinstance(zoom_radius, bool)
+                or not 1 <= float(zoom_radius) <= 500):
+            raise ValueError("maps.topography_zoom_radius_km must be between 1 and 500")
+
+        # Optional shapefile overlay for the point-centred topography only.
+        # The path is resolved relative to the YAML file, like ``output``.
+        overlay = m.get("topography_overlay")
+        if overlay is not None:
+            if isinstance(overlay, str):
+                overlay = {"path": overlay}
+                m["topography_overlay"] = overlay
+            if not isinstance(overlay, dict):
+                raise ValueError("maps.topography_overlay must be a path string or mapping")
+            if "path" not in overlay or not overlay["path"]:
+                raise ValueError("maps.topography_overlay.path is required")
+            overlay_path = (path.parent / overlay["path"]).resolve()
+            if not overlay_path.exists():
+                raise FileNotFoundError(f"Topography overlay shapefile not found: {overlay_path}")
+            overlay["path"] = overlay_path
+            overlay.setdefault("edgecolor", "#d7191c")
+            overlay.setdefault("linewidth", 2.0)
+            overlay.setdefault("alpha", 1.0)
+            overlay.setdefault("label", "Area of interest")
+            if (not isinstance(overlay["linewidth"], (int, float))
+                    or isinstance(overlay["linewidth"], bool)
+                    or float(overlay["linewidth"]) <= 0):
+                raise ValueError("maps.topography_overlay.linewidth must be > 0")
+            if (not isinstance(overlay["alpha"], (int, float))
+                    or isinstance(overlay["alpha"], bool)
+                    or not 0 <= float(overlay["alpha"]) <= 1):
+                raise ValueError("maps.topography_overlay.alpha must be between 0 and 1")
+
         step = m.get("every_hours", 6)
         if not isinstance(step, int) or isinstance(step, bool) or step < 1:
             raise ValueError("maps.every_hours must be a positive integer")

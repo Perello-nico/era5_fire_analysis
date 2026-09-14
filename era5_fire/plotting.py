@@ -469,27 +469,101 @@ def maps(ds, c, times=None, cities=None):
     return fig
 
 
-def topography(c):
-    """A static elevation panel independent of weather timestamps."""
+def _plot_topography_overlay(ax, c, extent, projection):
+    """Plot the configured vector overlay and return a legend handle.
+
+    The overlay is intentionally used only when requested by the caller; the
+    CLI enables it for the point-centred zoom and leaves the regional
+    topography map untouched. Vector data are reprojected to EPSG:4326 before
+    plotting.
+    """
+    overlay = c.get("maps", {}).get("topography_overlay")
+    if not overlay:
+        return None
+
+    try:
+        import geopandas as gpd
+        from shapely.geometry import box
+        from matplotlib.lines import Line2D
+    except ImportError as error:
+        raise ImportError(
+            "Topography shapefile overlays require geopandas and shapely"
+        ) from error
+
+    path = overlay["path"]
+    gdf = gpd.read_file(path)
+    if gdf.crs is None:
+        raise ValueError(f"Topography overlay has no CRS: {path}")
+    gdf = gdf.to_crs("EPSG:4326")
+    gdf = gdf[gdf.geometry.notna() & ~gdf.geometry.is_empty].copy()
+
+    west, east, south, north = extent
+    viewport = box(west, south, east, north)
+    gdf = gdf[gdf.geometry.intersects(viewport)].copy()
+    if gdf.empty:
+        print(f"Topography overlay does not intersect the zoom map: {path}")
+        return None
+
+    color = overlay.get("edgecolor", "#d7191c")
+    linewidth = float(overlay.get("linewidth", 2.0))
+    alpha = float(overlay.get("alpha", 1.0))
+    zorder = 15
+
+    geom_type = gdf.geometry.geom_type
+    polygon_mask = geom_type.isin(["Polygon", "MultiPolygon"])
+    line_mask = geom_type.isin(["LineString", "MultiLineString"])
+    point_mask = geom_type.isin(["Point", "MultiPoint"])
+
+    if polygon_mask.any():
+        gdf.loc[polygon_mask].boundary.plot(
+            ax=ax, color=color, linewidth=linewidth, alpha=alpha, zorder=zorder
+        )
+    if line_mask.any():
+        gdf.loc[line_mask].plot(
+            ax=ax, color=color, linewidth=linewidth, alpha=alpha, zorder=zorder
+        )
+    if point_mask.any():
+        gdf.loc[point_mask].plot(
+            ax=ax, color=color, markersize=max(12, linewidth * 10),
+            alpha=alpha, zorder=zorder
+        )
+
+    return Line2D(
+        [0], [0], color=color, linewidth=linewidth,
+        label=str(overlay.get("label", "Area of interest")),
+    )
+
+
+def topography(c, region=None, title=None, overlay=False):
+    """Render a static shaded-elevation panel for a region.
+
+    By default this uses ``c['region']`` (the existing general-area map).
+    Passing ``region`` allows the same renderer to create a point-centred zoom.
+    If ``overlay`` is true, the configured ``maps.topography_overlay`` vector
+    is drawn as a highlight on top of the elevation map.
+    """
     import cartopy.crs as ccrs
     from matplotlib.colors import LightSource, Normalize
     from matplotlib.cm import ScalarMappable
     from .topography import elevation
 
-    values, extent = elevation(c)
+    values, extent = elevation(c, region=region)
     west, east, south, north = extent
     finite = values[np.isfinite(values)]
     if not finite.size:
         raise ValueError("No valid topography elevations in the requested region")
+
     norm = Normalize(min(0, float(finite.min())), max(1, float(finite.max())))
     cmap = plt.get_cmap("terrain")
-    dx = (east - west) / values.shape[1] * 111_320 * max(.01, np.cos(np.deg2rad((north + south) / 2)))
+    dx = ((east - west) / values.shape[1] * 111_320
+          * max(.01, np.cos(np.deg2rad((north + south) / 2))))
     dy = (north - south) / values.shape[0] * 111_320
     colors = LightSource(azdeg=315, altdeg=45).shade(
         np.nan_to_num(values), cmap=cmap, norm=norm, dx=dx, dy=dy,
         blend_mode="soft",
     )
     colors[..., 3] = np.isfinite(values)
+
     projection = ccrs.PlateCarree()
     fig, ax = plt.subplots(figsize=(11, 7), subplot_kw={"projection": projection})
     fig.subplots_adjust(bottom=.16)
@@ -497,26 +571,43 @@ def topography(c):
     ax.set_extent(extent, crs=projection)
     gl = ax.gridlines(draw_labels=True, linewidth=.5, alpha=.3)
     gl.top_labels = gl.right_labels = False
+
+    legend_handles = []
     p = c.get("point")
     if p is not None:
-        ax.plot(p.get("grid_longitude", p["longitude"]),
-                p.get("grid_latitude", p["latitude"]),
-                marker="D", markersize=6, linestyle="none",
-                markerfacecolor="black", markeredgecolor="white",
-                transform=projection, label="Meteogram location")
-        ax.legend(loc="upper left")
-    ax.set_title("Topography — Copernicus GLO-90")
-    fig.colorbar(ScalarMappable(norm=norm, cmap=cmap), ax=ax, shrink=.8,
-                 label="Elevation above sea level (m)")
-    fig.text(.5, .04,
-             "Copernicus DEM GLO-90 · Display resampled from ~90 m surface elevation\n"
-             "© DLR e.V. 2010–2014 and © Airbus Defence and Space GmbH 2014–2018\n"
-             "Provided under COPERNICUS by the European Union and ESA; all rights reserved.",
-             ha="center", fontsize=7)
+        point_handle, = ax.plot(
+            p.get("grid_longitude", p["longitude"]),
+            p.get("grid_latitude", p["latitude"]),
+            marker="D", markersize=6, linestyle="none",
+            markerfacecolor="black", markeredgecolor="white",
+            transform=projection, label="Meteogram location", zorder=20,
+        )
+        legend_handles.append(point_handle)
+
+    if overlay:
+        overlay_handle = _plot_topography_overlay(ax, c, extent, projection)
+        if overlay_handle is not None:
+            legend_handles.append(overlay_handle)
+
+    if legend_handles:
+        ax.legend(handles=legend_handles, loc="upper left")
+
+    ax.set_title(title or "Topography — Copernicus GLO-90")
+    fig.colorbar(
+        ScalarMappable(norm=norm, cmap=cmap), ax=ax, shrink=.8,
+        label="Elevation above sea level (m)",
+    )
+    fig.text(
+        .5, .04,
+        "Copernicus DEM GLO-90 · Display resampled from ~90 m surface elevation\n"
+        "© DLR e.V. 2010–2014 and © Airbus Defence and Space GmbH 2014–2018\n"
+        "Provided under COPERNICUS by the European Union and ESA; all rights reserved.",
+        ha="center", fontsize=7,
+    )
     return fig
 
 
-def interactive_maps(ds, c, output_path, topography_src=None):
+def interactive_maps(ds, c, output_path, topography_src=None, topography_zoom_src=None):
     """Create a self-contained HTML viewer synchronized with the meteogram.
 
     The map sequence is rendered with the same Matplotlib/Cartopy ``maps``
@@ -725,12 +816,31 @@ def interactive_maps(ds, c, output_path, topography_src=None):
     outline-offset: 2px;
   }
   .hint { margin-top: 10px; color: GrayText; font-size: .85rem; }
+  .topography-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    padding: 0 16px 16px;
+  }
+  .topography-item { min-width: 0; }
+  .topography-item h3 { margin: 0 0 8px; font-size: .95rem; }
+  .topography-item img {
+    display: block;
+    width: 100%;
+    height: auto;
+    background: white;
+  }
+  @media (max-width: 900px) {
+    .topography-grid { grid-template-columns: 1fr; }
+  }
   .unavailable { padding: 16px; color: GrayText; }
 </style>
 </head>
 <body>
 <main>
   <h1 id="page-title">ERA5 weather maps</h1>
+
+  __TOPOGRAPHY_PANEL__
 
   <section id="meteogram-panel" class="panel">
     <div class="panel-heading"><h2>Point meteogram</h2></div>
@@ -885,15 +995,32 @@ showFrame(0);
 """
 
     terrain_panel = ""
+    terrain_items = []
     if topography_src is not None:
+        terrain_items.append(
+            '<div class="topography-item">'
+            '<h3>General area</h3>'
+            '<img alt="Regional shaded elevation map with meteogram location" '
+            f'src="{topography_src}">'
+            '</div>'
+        )
+    if topography_zoom_src is not None:
+        zoom_radius = maps_config.get("topography_zoom_radius_km", 20.0)
+        terrain_items.append(
+            '<div class="topography-item">'
+            f'<h3>Meteogram-point zoom (±{zoom_radius:g} km)</h3>'
+            '<img alt="Point-centred shaded elevation zoom around the meteogram location" '
+            f'src="{topography_zoom_src}">'
+            '</div>'
+        )
+    if terrain_items:
         terrain_panel = (
             '<section class="panel" aria-label="Topography">'
             '<div class="panel-heading"><h2>Topography</h2></div>'
-            '<img style="display:block;width:min(1050px,100%);margin:auto" '
-            'alt="Shaded elevation map with meteogram location" '
-            f'src="{topography_src}"></section>'
+            '<div class="topography-grid">' + ''.join(terrain_items) + '</div>'
+            '</section>'
         )
-    document = (document.replace("</main>", terrain_panel + "\n</main>")
+    document = (document.replace("__TOPOGRAPHY_PANEL__", terrain_panel)
                 .replace("__FRAMES__", frames_json)
                 .replace("__TITLE__", title_json)
                 .replace("__INTERVAL__", str(interval_ms))

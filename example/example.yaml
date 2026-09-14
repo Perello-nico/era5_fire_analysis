@@ -25,6 +25,17 @@ maps:
   interactive_meteogram_dpi: 110
   interactive_interval_ms: 900
   interactive_meteogram: True
+  # to plot topography
+  topography: True
+  topography_zoom: True  # add zoomed view
+  topography_zoom_radius_km: 20
+  # to add a shapefile
+  topography_overlay:
+    path: geometry/geometry.shp
+    edgecolor: "#d7191c"
+    linewidth: 2.0
+    alpha: 1.0
+    label: Fire perimeter
 timezone: Europe/Rome
 output: output # Relative to this configuration file.
 formats: [png]

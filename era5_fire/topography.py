@@ -22,22 +22,62 @@ def _cached_download(url, path):
     return path
 
 
-def elevation(c):
-    """Return a north-up elevation grid and its west/east/south/north extent."""
+def point_zoom_region(c, radius_km=None):
+    """Return a point-centred geographic box for the zoom topography map.
+
+    ``radius_km`` is the approximate half-width/half-height of the box.  For
+    example, 20 km gives a map roughly 40 x 40 km centred on the meteogram
+    point. Longitude spacing is corrected for latitude.
+    """
+    p = c.get("point")
+    if p is None:
+        raise ValueError("Point-centred topography requires a configured point")
+
+    if radius_km is None:
+        radius_km = c.get("maps", {}).get("topography_zoom_radius_km", 20.0)
+
+    lat = float(p.get("grid_latitude", p["latitude"]))
+    lon = float(p.get("grid_longitude", p["longitude"]))
+    radius_km = float(radius_km)
+
+    dlat = radius_km / 111.32
+    cos_lat = max(0.01, abs(math.cos(math.radians(lat))))
+    dlon = radius_km / (111.32 * cos_lat)
+
+    return {
+        "north": min(90.0, lat + dlat),
+        "west": max(-180.0, lon - dlon),
+        "south": max(-90.0, lat - dlat),
+        "east": min(180.0, lon + dlon),
+    }
+
+
+def elevation(c, region=None):
+    """Return a north-up elevation grid and its west/east/south/north extent.
+
+    If ``region`` is omitted, ``c['region']`` is used.  Passing a region makes
+    it possible to reuse the same cached Copernicus tiles for a point-centred
+    zoom map.
+    """
     import rasterio
     from rasterio.transform import from_bounds
     from rasterio.warp import reproject, Resampling
 
-    r = c["region"]
-    west, east, south, north = (r[k] for k in ("west", "east", "south", "north"))
+    r = c["region"] if region is None else region
+    west, east, south, north = (float(r[k]) for k in ("west", "east", "south", "north"))
+    if not (-90 <= south < north <= 90 and -180 <= west < east <= 180):
+        raise ValueError("Invalid topography region")
+
     cache = Path(c["output"]) / "raw" / "topography"
     listing = _cached_download(f"{BASE_URL}/tileList.txt", cache / "tileList.txt")
     available = set(listing.read_text().split())
+
     # Bound display memory independently of domain size and native resolution.
     width = min(1200, max(2, math.ceil((east - west) * 1200)))
     height = min(1200, max(2, math.ceil((north - south) * 1200)))
     transform = from_bounds(west, south, east, north, width, height)
     result = np.full((height, width), np.nan, dtype="float32")
+
     for lat in range(math.floor(south), math.ceil(north)):
         for lon in range(math.floor(west), math.ceil(east)):
             name = (f"Copernicus_DSM_COG_30_{'N' if lat >= 0 else 'S'}{abs(lat):02d}_00_"
@@ -45,7 +85,10 @@ def elevation(c):
             if name not in available and name + '/' not in available:
                 # The provider omits ocean-only tiles.
                 continue
-            path = _cached_download(f"{BASE_URL}/{name}/{name}.tif", cache / f"{name}.tif")
+            path = _cached_download(
+                f"{BASE_URL}/{name}/{name}.tif",
+                cache / f"{name}.tif",
+            )
             with rasterio.open(path) as src:
                 reproject(
                     rasterio.band(src, 1), result,
@@ -54,6 +97,7 @@ def elevation(c):
                     dst_crs="EPSG:4326", dst_nodata=np.nan,
                     resampling=Resampling.bilinear, init_dest_nodata=False,
                 )
+
     # Uncovered ocean is zero; native missing pixels remain visibly masked.
     ys = north - (np.arange(height) + .5) * (north - south) / height
     xs = west + (np.arange(width) + .5) * (east - west) / width
@@ -62,5 +106,7 @@ def elevation(c):
             name = (f"Copernicus_DSM_COG_30_{'N' if lat >= 0 else 'S'}{abs(lat):02d}_00_"
                     f"{'E' if lon >= 0 else 'W'}{abs(lon):03d}_00_DEM")
             if name not in available and name + '/' not in available:
-                result[np.ix_((ys >= lat) & (ys < lat + 1), (xs >= lon) & (xs < lon + 1))] = 0
+                result[np.ix_((ys >= lat) & (ys < lat + 1),
+                              (xs >= lon) & (xs < lon + 1))] = 0
+
     return result, (west, east, south, north)

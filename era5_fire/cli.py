@@ -98,6 +98,7 @@ def save(fig, base, formats):
 
 def plot(c):
     from .plotting import interactive_maps, meteogram, maps, topography, plt
+    from .topography import point_zoom_region
     import base64
     import io
     dest = c["output"] / "figures"
@@ -114,18 +115,53 @@ def plot(c):
             plt.close(fig)
 
         topography_src = None
-        if kind == "maps" and c.get("maps", {}).get("topography", True):
+        topography_zoom_src = None
+        maps_config = c.get("maps", {})
+
+        if kind == "maps" and maps_config.get("topography", True):
+            # Existing topography map for the complete configured region.
             fig = topography(c)
             try:
                 save(fig, dest / "topography", c["formats"])
                 buffer = io.BytesIO()
                 fig.savefig(buffer, format="png", dpi=140, facecolor="white")
-                topography_src = "data:image/png;base64," + base64.b64encode(buffer.getvalue()).decode("ascii")
+                topography_src = (
+                    "data:image/png;base64," +
+                    base64.b64encode(buffer.getvalue()).decode("ascii")
+                )
             finally:
                 plt.close(fig)
 
-        if kind == "maps" and c.get("maps", {}).get("interactive", True):
-            html_path = interactive_maps(ds, c, dest / "maps_interactive.html", topography_src=topography_src)
+            # Additional point-centred zoom.  It is skipped gracefully for
+            # map-only configurations that do not define a meteogram point.
+            if maps_config.get("topography_zoom", True) and c.get("point") is not None:
+                radius_km = float(maps_config.get("topography_zoom_radius_km", 20.0))
+                zoom_region = point_zoom_region(c, radius_km=radius_km)
+                fig = topography(
+                    c,
+                    region=zoom_region,
+                    title=f"Topography — {radius_km:g} km radius around meteogram point",
+                    overlay=True,
+                )
+                try:
+                    save(fig, dest / "topography_zoom", c["formats"])
+                    buffer = io.BytesIO()
+                    fig.savefig(buffer, format="png", dpi=140, facecolor="white")
+                    topography_zoom_src = (
+                        "data:image/png;base64," +
+                        base64.b64encode(buffer.getvalue()).decode("ascii")
+                    )
+                finally:
+                    plt.close(fig)
+
+        if kind == "maps" and maps_config.get("interactive", True):
+            html_path = interactive_maps(
+                ds,
+                c,
+                dest / "maps_interactive.html",
+                topography_src=topography_src,
+                topography_zoom_src=topography_zoom_src,
+            )
             print(f"Interactive maps: {html_path}")
 
 
