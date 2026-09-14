@@ -15,6 +15,11 @@ import pandas as pd
 # Discrete colours approximated from the user-provided reference images.
 # End colours extend to values outside the displayed temperature/RH range.
 PALETTES = {
+    "precipitation_accumulation": (
+        [0.5, 2, 4, 10, 25, 50, 100, 250],
+        ["#60f5f5", "#347ef5", "#1000f0", "#b51ff0",
+         "#f000f0", "#ff801a", "#e51b0a"],
+    ),
     "wind_speed": (
         list(range(0, 101, 10)),
         ["#ffffff00", "#fff9b0", "#ffff4d", "#a2e529", "#65d421",
@@ -39,7 +44,7 @@ PALETTES = {
 def palette(variable):
     boundaries, colors = PALETTES[variable]
     cmap = ListedColormap(colors, name=f"fire_{variable}")
-    cmap = cmap.with_extremes(under=colors[0], over=colors[-1], bad=(0, 0, 0, 0))
+    cmap = cmap.with_extremes(under=(0, 0, 0, 0) if variable == "precipitation_accumulation" else colors[0], over=colors[-1], bad=(0, 0, 0, 0))
     return cmap, BoundaryNorm(boundaries, cmap.N)
 
 
@@ -99,10 +104,18 @@ def meteogram(ds, c, highlight_time=None):
         label="Hourly precipitation",
     )
     axes[2].set(
-        ylabel="mm",
-        title="Precipitation in the preceding hour",
+        ylabel="Hourly (mm)",
+        title="Hourly precipitation and accumulation from the first hour",
         ylim=(0, None),
     )
+    accumulated_rain = axes[2].twinx()
+    accumulated_rain.plot(
+        times, ds.precipitation.cumsum("time", skipna=False),
+        color="#b51ff0", lw=2, label="Accumulated precipitation",
+    )
+    accumulated_rain.set(ylabel="Accumulated (mm)", ylim=(0, None))
+    accumulated_rain.tick_params(axis="y", colors="#b51ff0")
+    accumulated_rain.yaxis.label.set_color("#b51ff0")
 
     days = pd.date_range(
         times[0].normalize() - pd.DateOffset(days=1),
@@ -141,7 +154,7 @@ def meteogram(ds, c, highlight_time=None):
     axes[-1].set_xlabel(f"Time ({c['timezone']})")
 
     handles, labels = [], []
-    for ax in [axes[0], rh, axes[1], axes[2]]:
+    for ax in [axes[0], rh, axes[1], axes[2], accumulated_rain]:
         h, l = ax.get_legend_handles_labels()
         handles.extend(h)
         labels.extend(l)
@@ -225,12 +238,43 @@ def _load_map_cities(region, maps_config):
     return cities[:max_cities]
 
 
+def map_accumulations(ds, c):
+    """Sum hourly precipitation from the first map's hour through each map.
+
+    The first frame uses its preceding hour. Reject incomplete windows,
+    including older sparse maps.nc files, instead of understating totals.
+    """
+    import xarray as xr
+
+    times = pd.DatetimeIndex(c.get("map_times", ds.time.values))
+    if times.tz is not None:
+        times = times.tz_convert("UTC").tz_localize(None)
+    if times.empty or times.has_duplicates or not times.is_monotonic_increasing:
+        raise ValueError("Map timestamps must be nonempty, unique and increasing")
+    actual = pd.DatetimeIndex(ds.time.values)
+    totals, starts = [], []
+    start = times[0] - pd.Timedelta(hours=1)
+    for end in times:
+        hours = pd.date_range(start + pd.Timedelta(hours=1), end, freq="h")
+        if actual.has_duplicates or not hours.isin(actual).all():
+            raise ValueError("Rain accumulation requires every intervening hour; "
+                             "rerun download and process to refresh maps.nc")
+        total = ds.precipitation.sel(time=hours).sum("time", skipna=False)
+        totals.append(total)
+        starts.append(start.to_datetime64())
+    result = xr.concat(totals, pd.Index(times, name="time"))
+    result.attrs = {"units": "mm", "description": "Cumulative precipitation including the first map's preceding hour"}
+    return result.assign_coords(accumulation_start=("time", starts))
+
+
 def maps(ds, c, times=None, cities=None):
-    """One row per timestamp, three columns, with shared discrete legends."""
+    """One row per timestamp, four columns, with shared discrete legends."""
     import cartopy.crs as ccrs
     import cartopy.feature as cfeature
 
     projection = ccrs.PlateCarree()
+    accumulation = map_accumulations(ds, c)
+    ds = ds.assign(precipitation_accumulation=accumulation)
 
     # Static maps use all configured map times. The interactive viewer passes
     # one time at a time so it can render one compact frame per slider step.
@@ -242,9 +286,9 @@ def maps(ds, c, times=None, cities=None):
         ds = ds.sel(time=selected_times.values)
 
     count = ds.sizes["time"]
-    fig = plt.figure(figsize=(16, 3.8 * count + 1.5))
+    fig = plt.figure(figsize=(21, 3.8 * count + 1.5))
     grid = fig.add_gridspec(
-        count + 1, 3,
+        count + 1, 4,
         height_ratios=[1] * count + [.06],
         left=.10, right=.98,
         top=.88 if count == 1 else .92,
@@ -253,7 +297,7 @@ def maps(ds, c, times=None, cities=None):
     )
 
     axes = np.array([
-        [fig.add_subplot(grid[row, col], projection=projection) for col in range(3)]
+        [fig.add_subplot(grid[row, col], projection=projection) for col in range(4)]
         for row in range(count)
     ])
 
@@ -261,6 +305,7 @@ def maps(ds, c, times=None, cities=None):
         ("temperature", "2 m temperature (°C)"),
         ("relative_humidity", "2 m relative humidity (%)"),
         ("wind_speed", "10 m wind speed (km/h)"),
+        ("precipitation_accumulation", "Accumulated precipitation (mm)"),
     ]
 
     r = c["region"]
@@ -299,12 +344,18 @@ def maps(ds, c, times=None, cities=None):
                 transform=projection, shading="auto", cmap=cmap, norm=norm,
             )
 
+            if name == "precipitation_accumulation":
+                start = pd.Timestamp(accumulation.accumulation_start.sel(time=t).values)
+                ax.text(.5, 1.02,
+                        f"{start:%d %b %H:%M} – {pd.Timestamp(t):%d %b %H:%M} UTC",
+                        transform=ax.transAxes, ha="center", fontsize=8)
+
             if row == 0:
                 artists.append(art)
                 position = ax.get_position()
                 fig.text(
                     (position.x0 + position.x1) / 2,
-                    position.y1 + .015,
+                    position.y1 + .045,
                     label,
                     ha="center", va="bottom", fontsize=12,
                 )

@@ -40,13 +40,13 @@ def test_pipeline(tmp_path):
     path.write_text(yaml.safe_dump({"start": "2023-07-31T12:00Z", "end": "2023-08-01T12:00Z",
         "point": {"latitude": 38.1, "longitude": 13.1},
         "region": {"north": 39, "south": 37, "west": 12, "east": 14},
-        "maps": {"every_hours": 12, "coastlines": False}, "output": "out"}))
+        "maps": {"every_hours": 12, "coastlines": False, "cities": False, "borders": False, "lakes": False}, "output": "out"}))
     c = load_config(path)
     jobs = plans(c)
     requests = [r for k, r, _ in jobs if k == "point"]
     assert [r["month"] for r in requests] == [["07"], ["08"]]
     assert sum(len(r["time"]) for r in requests) == 25
-    assert sum(len(r["time"]) for k, r, _ in jobs if k == "maps") == 3
+    assert sum(len(r["time"]) for k, r, _ in jobs if k == "maps") == 25
     for _, request, target in jobs:
         target.parent.mkdir(parents=True, exist_ok=True)
         day = "-".join(request[k][0] for k in ("year", "month", "day"))
@@ -124,17 +124,40 @@ def test_plot_palettes_and_layout():
     ds = derive(data(times))
     c = {"timezone": "Europe/Rome", "point": {"latitude": 38, "longitude": 13},
          "region": {"north": 39, "south": 37, "west": 12, "east": 14},
-         "maps": {"coastlines": False}}
+         "maps": {"coastlines": False, "cities": False, "borders": False, "lakes": False}}
     fig = maps(ds, c)
-    assert len(fig.axes) == 9  # 2 x 3 maps + 3 shared colorbars
-    for ax in [fig.axes[2], fig.axes[5]]:
+    assert len(fig.axes) == 12  # 2 x 4 maps + 4 shared colorbars
+    for ax in [fig.axes[2], fig.axes[6]]:
         barbs = next(artist for artist in ax.collections if isinstance(artist, Barbs))
         np.testing.assert_allclose(barbs.v, -18)  # m/s converted to km/h
         np.testing.assert_allclose(ax.collections[0].get_array(), 18)
     plt.close(fig)
     fig = meteogram(ds.sel(latitude=38, longitude=13), c)
-    assert len(fig.axes) == 4  # Three panels plus the RH secondary axis
+    assert len(fig.axes) == 5  # Three panels plus RH and accumulated rain axes
     labels = [line.get_label() for ax in fig.axes for line in ax.lines]
     assert "Relative humidity" in labels
+    rain_line = next(line for ax in fig.axes for line in ax.lines
+                     if line.get_label() == "Accumulated precipitation")
+    np.testing.assert_allclose(rain_line.get_ydata(), [1, 2])
     assert not any("VPD" in label for label in labels)
     plt.close(fig)
+
+
+def test_rain_accumulation():
+    from era5_fire.plotting import map_accumulations, palette
+    times = pd.date_range("2023-07-31T22:00", periods=7, freq="h")
+    ds = derive(data(times))
+    ds.precipitation[:] = np.arange(1, 8)[:, None, None]
+    c = {"map_times": times[[0, 2, 6]].tz_localize("UTC").tz_convert("Europe/Rome")}
+    rain = map_accumulations(ds, c)
+    np.testing.assert_allclose(rain[:, 0, 0], [1, 6, 28])
+    assert (rain.accumulation_start.values ==
+            (times[0] - pd.Timedelta(hours=1)).to_datetime64()).all()
+    with pytest.raises(ValueError, match="every intervening hour"):
+        map_accumulations(ds.isel(time=[0, 2, 6]), c)
+    ds.precipitation[3, 0, 0] = np.nan
+    assert np.isnan(map_accumulations(ds, c)[2, 0, 0])
+    cmap, norm = palette("precipitation_accumulation")
+    assert cmap(norm(.49))[-1] == 0
+    assert cmap(norm(.5))[-1] == 1
+    assert cmap(norm(250)) == cmap(norm(300))

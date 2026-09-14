@@ -17,7 +17,13 @@ maps:
   every_hours: 6
   # Alternatively provide exact UTC timestamps within start/end:
   # times: ["2023-07-24T12:00:00Z", "2023-07-25T15:00:00Z"]
-  coastlines: true  # First use may download Cartopy Natural Earth data.
+  coastlines: True  # First use may download Cartopy Natural Earth data.
+  # for interactive maps
+  interactive: True
+  interactive_dpi: 110
+  interactive_meteogram_dpi: 110
+  interactive_interval_ms: 900
+  interactive_meteogram: True
 timezone: Europe/Rome
-output: ../output/palermo  # Relative to this configuration file.
+output: ../output/example # Relative to this configuration file.
 formats: [png, pdf]

@@ -64,19 +64,21 @@ era5-fire plot --config configs/example.yaml
 - `formats`: PNG and/or PDF.
 - `output`: path relative to the configuration file.
 
-Point data are downloaded hourly in a small box; regional data only at selected map times. Requests are split by day and cached by request content. These streams have independent caches. Downloads use temporary files and retries. Delete a cached file to refresh preliminary ERA5T data after final ERA5 becomes available.
+Point data are downloaded hourly in a small box; regional data hourly between the first and last map times, to calculate precipitation totals. Requests are split by day and cached by request content. These streams have independent caches. Downloads use temporary files and retries. Delete a cached file to refresh preliminary ERA5T data after final ERA5 becomes available.
 
 ## Outputs
 
 - `raw/`: original downloads and JSON request metadata.
 - `point.nc`, `point.csv`: temperature/dewpoint (°C), RH (%), wind/gust (m/s), direction (degrees), precipitation (mm), VPD (kPa), and trailing 24-hour precipitation. CSV timestamps include UTC offsets; NetCDF times are UTC.
-- `maps.nc`: processed fields at selected timestamps.
-- `figures/meteogram.png` (and/or PDF): three panels styled after `~/Codes/meteogram`: combined temperature/dewpoint and dotted RH on a secondary axis; wind speed/gusts with direction arrows; hourly precipitation. Fixed 18:00–06:00 night shading uses the configured timezone. VPD remains in the data exports but is not plotted.
-- `figures/maps.png` (and/or PDF): one combined figure with a row per selected timestamp and columns for temperature, RH and wind. Three shared discrete colourbars apply to every row. Old individual timestamp figures from earlier runs are not removed automatically.
+- `maps.nc`: hourly processed fields between the first and last selected map timestamps.
+- `figures/meteogram.png` (and/or PDF): three panels styled after `~/Codes/meteogram`: combined temperature/dewpoint and dotted RH on a secondary axis; wind speed/gusts with direction arrows; hourly precipitation bars with a cumulative precipitation line on the right axis (mm), summed from the first available hour. Fixed 18:00–06:00 night shading uses the configured timezone. VPD remains in the data exports but is not plotted.
+- `figures/maps.png` (and/or PDF): one combined figure with a row per selected timestamp and columns for temperature, RH, wind and accumulated precipitation. Four shared discrete colourbars apply to every row. Old individual timestamp figures from earlier runs are not removed automatically.
 
 Map palettes approximate the supplied reference screenshots; explicit colours and boundaries are in `era5_fire/plotting.py`. Temperature bands span −48 to 56°C every 4°C. RH boundaries are 5, 10, 20, …, 100%, with brown below 5%. Temperature and RH use their end colours outside these ranges. Wind shading uses km/h: 0–10 is transparent, 10–20 pale yellow, then 10 km/h bands from yellow through green to dark blue; values at or above 90 use the darkest blue. Wind barbs also use km/h (half barb 5, full barb 10, pennant 50), as labelled on the figure. Meteogram wind arrows point in the direction of motion; exported wind values remain in m/s.
 
-To regenerate figures from existing processed data without downloading again:
+Precipitation boundaries are 0.5, 2, 4, 10, 25, 50, 100 and 250 mm, using the supplied cyan–blue–purple–magenta–orange–red palette. Values below 0.5 mm are transparent; values above 250 mm remain red. Older sparse `maps.nc` files require rerunning `download` and `process` to obtain the intervening hours. Regional downloads are larger because they now include every hour.
+
+To regenerate figures from processed data containing those hourly values:
 
 ```bash
 uv run era5-fire plot --config configs/example.yaml
@@ -90,7 +92,7 @@ ERA5 has a 0.25° CDS grid and approximately 31 km native atmospheric resolution
 
 Relative humidity and VPD use a Magnus approximation over liquid water, including below freezing. RH is bounded to 0–100%; VPD is nonnegative. Wind direction uses the meteorological **from** convention and is undefined for speeds below 0.1 m/s.
 
-For this hourly ERA5 CDS product, precipitation is water equivalent in the hour **ending** at its timestamp, including snow. Metres are converted to millimetres without differencing successive hours. Gusts are maxima since previous post-processing, over the preceding hour. Sparse map sampling does not produce multi-hour accumulations or maxima. Trailing 24-hour precipitation is missing until 24 samples exist; request an earlier start for antecedent conditions. Formal Fire Weather Index calculations are not implemented.
+For this hourly ERA5 CDS product, precipitation is water equivalent in the hour **ending** at its timestamp, including snow. Metres are converted to millimetres without differencing successive hours. Gusts are maxima since previous post-processing, over the preceding hour. Map precipitation is cumulative from the first selected map's available hour through the current map time, including the hour ending at the first map timestamp. The first map shows its preceding hour; subsequent maps retain that amount and add every following hour. Each precipitation panel labels its interval in UTC; totals include snow water equivalent. Gusts remain hourly maxima. Trailing 24-hour precipitation is missing until 24 samples exist; request an earlier start for antecedent conditions. Formal Fire Weather Index calculations are not implemented.
 
 The reader handles ZIP archives with separate instantaneous, accumulated and gust NetCDF files, and merges ERA5/ERA5T `expver` values preferring final ERA5. Missing values or unexpected timestamps stop processing rather than silently filling gaps.
 

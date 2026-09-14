@@ -64,7 +64,8 @@ def process(c, jobs):
         if missing:
             raise FileNotFoundError(f"Run download first. Missing: {missing[0]}")
         ds = xr.concat([read_payload(p) for p in files], dim="time").sortby("time")
-        expected = c["map_times"] if kind == "maps" else pd.date_range(c["start"], c["end"], freq="h")
+        expected = (pd.date_range(c["map_times"][0], c["map_times"][-1], freq="h")
+                    if kind == "maps" else pd.date_range(c["start"], c["end"], freq="h"))
         expected = expected.tz_localize(None)
         actual = pd.DatetimeIndex(ds.time.values)
         if actual.has_duplicates or not actual.equals(expected):

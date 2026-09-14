@@ -84,11 +84,11 @@ def point_area(p):
 
 
 def plans(c):
-    """Separate small hourly point requests from sparse regional requests."""
+    """Separate hourly point and regional requests."""
     jobs = []
     if c["mode"] != "point":
         r = c["region"]
-        jobs.append(("maps", [r[k] for k in ("north", "west", "south", "east")], c["map_times"]))
+        jobs.append(("maps", [r[k] for k in ("north", "west", "south", "east")], pd.date_range(c["map_times"][0], c["map_times"][-1], freq="h")))
     if c["mode"] != "maps":
         jobs.append(("point", point_area(c["point"]), pd.date_range(c["start"], c["end"], freq="h")))
     result = []
