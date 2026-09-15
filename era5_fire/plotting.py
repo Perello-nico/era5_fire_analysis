@@ -49,7 +49,7 @@ def palette(variable):
 
 
 def meteogram(ds, c, highlight_time=None):
-    """Three panels: T/Td/RH, wind/gust/direction, and precipitation.
+    """Four panels: T/Td, RH, wind/gust/direction, and precipitation.
 
     If ``highlight_time`` is supplied, draw a vertical line at that valid time.
     The interactive HTML viewer uses the same axes geometry to overlay a
@@ -63,62 +63,100 @@ def meteogram(ds, c, highlight_time=None):
     times = times.tz_convert(c["timezone"])
 
     tz = ZoneInfo(c["timezone"])
-    fig, axes = plt.subplots(3, 1, figsize=(13, 9), sharex=True,
-                             gridspec_kw={"height_ratios": [1.2, 1, .75]})
-    fig.subplots_adjust(left=.08, right=.92, bottom=.1, top=.8, hspace=.35)
 
-    rh = axes[0].twinx()
-    axes[0].plot(times, ds.temperature, color="#ff3b30", lw=2, label="Temperature")
-    axes[0].plot(times, ds.dewpoint, color="#9b6bd6", lw=2, label="Dew point")
-    rh.plot(times, ds.relative_humidity, color="#0c53e0", lw=2, ls=":",
-            label="Relative humidity")
-    rh.set(ylabel="%", ylim=(0, 100))
-    rh.tick_params(axis="y", colors="#0c53e0")
-    rh.yaxis.label.set_color("#0c53e0")
-    axes[0].set(ylabel="°C", title="Temperature and relative humidity")
+    # Keep approximately the same overall figure size as before, but split
+    # temperature/dew point and relative humidity into separate, shorter panels.
+    fig, axes = plt.subplots(
+        4, 1,
+        figsize=(13, 9),
+        sharex=True,
+        gridspec_kw={"height_ratios": [0.95, 0.70, 0.90, 0.75]},
+    )
+    fig.subplots_adjust(
+        left=.08, right=.92, bottom=.10, top=.80, hspace=.30
+    )
+
+    # 1) Temperature and dew point.
+    axes[0].plot(
+        times, ds.temperature,
+        color="#ff3b30", lw=2, label="Temperature",
+    )
+    axes[0].plot(
+        times, ds.dewpoint,
+        color="#9b6bd6", lw=2, label="Dew point",
+    )
+    axes[0].set(
+        ylabel="°C",
+        title="Temperature and dew point",
+    )
     axes[0].margins(y=.15)
 
+    # 2) Relative humidity on its own panel.
+    axes[1].plot(
+        times, ds.relative_humidity,
+        color="#0c53e0", lw=2, ls="-",
+        label="Relative humidity",
+    )
+    axes[1].set(
+        ylabel="%",
+        ylim=(0, 100),
+        title="Relative humidity",
+    )
+
+    # 3) Wind.
     speed = ds.wind_speed.values * 3.6
     gust = ds.wind_gust.values * 3.6
-    axes[1].plot(times, speed, color="#2ecc71", lw=2, label="Wind speed")
-    axes[1].plot(times, gust, color="#198754", lw=1.5, ls="--",
-                 label="Hourly maximum gust")
+    axes[2].plot(
+        times, speed,
+        color="#2ecc71", lw=2, label="Wind speed",
+    )
+    axes[2].plot(
+        times, gust,
+        color="#198754", lw=1.5, ls="--",
+        label="Hourly maximum gust",
+    )
     maximum = max(float(np.nanmax(speed)), float(np.nanmax(gust)), 1)
 
     stride = max(1, int(np.ceil(len(times) / 48)))
     direction = np.deg2rad(ds.wind_direction.values[::stride])
-    axes[1].quiver(
+    axes[2].quiver(
         mdates.date2num(times[::stride]),
         np.full(len(direction), maximum * 1.12),
         -np.sin(direction), -np.cos(direction),
         angles="uv", scale_units="inches", scale=7,
         width=.002, pivot="middle", color="#1b1e1b",
     )
-    axes[1].set(
+    axes[2].set(
         ylabel="km/h",
         ylim=(0, maximum * 1.28),
         title="Wind - arrows show direction of motion",
     )
 
-    axes[2].bar(
+    # 4) Hourly and accumulated precipitation.
+    axes[3].bar(
         times, ds.precipitation,
         width=-1/24, align="edge", color="#4682b4",
         label="Hourly precipitation",
     )
-    axes[2].set(
+    axes[3].set(
         ylabel="Hourly (mm)",
         title="Hourly precipitation and accumulation from the first hour",
         ylim=(0, None),
     )
-    accumulated_rain = axes[2].twinx()
-    accumulated_rain.plot(
-        times, ds.precipitation.cumsum("time", skipna=False),
-        color="#0000ff", lw=2, label="Accumulated precipitation",
-    )
-    accumulated_rain.set(ylabel="Accumulated (mm)", ylim=(0, None))
-    accumulated_rain.tick_params(axis="y", colors="#0000ff")
-    accumulated_rain.yaxis.label.set_color("#0000ff")
 
+    accumulated_rain = axes[3].twinx()
+    accumulated_rain.plot(
+        times,
+        ds.precipitation.cumsum("time", skipna=False),
+        color="#808080", lw=2,
+        label="Accumulated precipitation",
+    )
+    accumulated_rain.set(
+        ylabel="Accumulated (mm)",
+        ylim=(0, None),
+    )
+
+    # Fixed 18:00-06:00 night bands in the configured display timezone.
     days = pd.date_range(
         times[0].normalize() - pd.DateOffset(days=1),
         times[-1].normalize() + pd.DateOffset(days=1),
@@ -128,13 +166,21 @@ def meteogram(ds, c, highlight_time=None):
         ax.set_facecolor("white")
         ax.grid(color="#dce1e6", lw=.7)
         ax.set_axisbelow(True)
+
         for spine in ax.spines.values():
             spine.set_color("#444444")
+
         for day in days:
             night_start = day + pd.DateOffset(hours=18)
             night_end = day + pd.DateOffset(days=1, hours=6)
-            ax.axvspan(night_start, night_end, color="#95a0a4", alpha=.1, lw=0)
-            ax.axvline(day, color="#111111", alpha=.2, ls=":", lw=1.8)
+            ax.axvspan(
+                night_start, night_end,
+                color="#95a0a4", alpha=.1, lw=0,
+            )
+            ax.axvline(
+                day,
+                color="#111111", alpha=.2, ls=":", lw=1.8,
+            )
 
     if highlight_time is not None:
         marker_time = pd.Timestamp(highlight_time)
@@ -143,8 +189,12 @@ def meteogram(ds, c, highlight_time=None):
         else:
             marker_time = marker_time.tz_convert("UTC")
         marker_time = marker_time.tz_convert(c["timezone"])
+
         for ax in axes:
-            ax.axvline(marker_time, color="black", lw=1.7, zorder=25)
+            ax.axvline(
+                marker_time,
+                color="black", lw=1.7, zorder=25,
+            )
 
     axes[-1].set_xlim(
         times[0] - pd.Timedelta(hours=1),
@@ -155,15 +205,19 @@ def meteogram(ds, c, highlight_time=None):
     )
     axes[-1].set_xlabel(f"Time ({c['timezone']})")
 
+    # One common legend for all meteogram panels.
     handles, labels = [], []
-    for ax in [axes[0], rh, axes[1], axes[2], accumulated_rain]:
+    for ax in [axes[0], axes[1], axes[2], axes[3], accumulated_rain]:
         h, l = ax.get_legend_handles_labels()
         handles.extend(h)
         labels.extend(l)
+
     fig.legend(
         handles, labels,
-        loc="upper center", bbox_to_anchor=(.5, .9),
-        ncol=3, frameon=False,
+        loc="upper center",
+        bbox_to_anchor=(.5, .9),
+        ncol=3,
+        frameon=False,
     )
 
     p = c["point"]

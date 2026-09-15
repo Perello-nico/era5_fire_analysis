@@ -1,0 +1,18 @@
+# This is an example configuration file for generating point data only plots.
+
+start: "2023-07-24T00:00:00Z"
+end: "2023-07-26T23:00:00Z"
+mode: point
+
+point:
+  name: Palermo
+  latitude: 38.12
+  longitude: 13.36
+
+timezone: Europe/Rome
+output: output/output_point_data_only
+
+outputs:
+  png: false
+  pdf: false
+  interactive: false

@@ -35,9 +35,47 @@ def load_config(path):
         raise ValueError("mode must be both, point, or maps")
     c.setdefault("timezone", "UTC")
     ZoneInfo(c["timezone"])
-    c.setdefault("formats", ["png"])
-    if not c["formats"] or set(c["formats"]) - {"png", "pdf"}:
-        raise ValueError("formats must contain png and/or pdf")
+
+    # Output selection.  New preferred syntax:
+    #   outputs:
+    #     png: true
+    #     pdf: false
+    #     interactive: true
+    # The legacy ``formats`` list and ``maps.interactive`` flag are still
+    # accepted for backward compatibility.
+    outputs = c.get("outputs")
+    if outputs is None:
+        formats = c.get("formats", ["png"])
+        if isinstance(formats, str):
+            formats = [formats]
+        if formats is None:
+            formats = []
+        if not isinstance(formats, (list, tuple)) or set(formats) - {"png", "pdf"}:
+            raise ValueError("formats must contain only png and/or pdf")
+        outputs = {
+            "png": "png" in formats,
+            "pdf": "pdf" in formats,
+        }
+        legacy_maps = c.get("maps", {}) if isinstance(c.get("maps", {}), dict) else {}
+        outputs["interactive"] = bool(legacy_maps.get("interactive", True if c.get("mode", "both") != "point" else False))
+    else:
+        if not isinstance(outputs, dict):
+            raise ValueError("outputs must be a mapping with png/pdf/interactive booleans")
+        outputs = dict(outputs)
+        for key in ("png", "pdf", "interactive"):
+            outputs.setdefault(key, False)
+            if not isinstance(outputs[key], bool):
+                raise ValueError(f"outputs.{key} must be true or false")
+
+    static_formats = [fmt for fmt in ("png", "pdf") if outputs.get(fmt, False)]
+
+    # All three flags may be false.  This is a valid data-only workflow:
+    # download/process still create point.nc/point.csv and/or maps.nc, while
+    # the plotting stage becomes a no-op.
+    c["outputs"] = outputs
+    c["formats"] = static_formats
+    c["write_interactive"] = outputs.get("interactive", False)
+
     c["output"] = (path.parent / c.get("output", "../output")).resolve()
     if c["mode"] != "maps":
         p = c["point"]
@@ -90,10 +128,11 @@ def load_config(path):
         if not isinstance(step, int) or isinstance(step, bool) or step < 1:
             raise ValueError("maps.every_hours must be a positive integer")
 
-        # Generate a self-contained HTML time-slider viewer by default.
-        interactive = m.setdefault("interactive", True)
-        if not isinstance(interactive, bool):
-            raise ValueError("maps.interactive must be true or false")
+        # Interactive HTML output is now controlled primarily by ``outputs``.
+        # ``maps.interactive`` is still accepted as a legacy alias when
+        # ``outputs`` is not used explicitly.
+        interactive = c["write_interactive"]
+        m["interactive"] = interactive
 
         interactive_dpi = m.setdefault("interactive_dpi", 110)
         if (not isinstance(interactive_dpi, int) or isinstance(interactive_dpi, bool)

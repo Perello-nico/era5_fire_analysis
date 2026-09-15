@@ -97,72 +97,95 @@ def save(fig, base, formats):
 
 
 def plot(c):
+    static_formats = c.get("formats", [])
+    write_interactive = bool(c.get("write_interactive", False)) and c["mode"] != "point"
+
+    # Data-only workflow: ``run`` still downloads/processes NetCDF/CSV files,
+    # but there is nothing to render and no figures directory is created.
+    if not static_formats and not write_interactive:
+        print("Plotting skipped: no static or interactive outputs requested")
+        return
+
     from .plotting import interactive_maps, meteogram, maps, topography, plt
     from .topography import point_zoom_region
     import base64
     import io
+
     dest = c["output"] / "figures"
     dest.mkdir(parents=True, exist_ok=True)
-    for kind, builder, filename in [("point", meteogram, "meteogram"), ("maps", maps, "maps")]:
-        if (kind == "point" and c["mode"] == "maps") or (kind == "maps" and c["mode"] == "point"):
-            continue
-        with xr.open_dataset(c["output"] / f"{kind}.nc") as source:
+    maps_config = c.get("maps", {})
+
+    # Point meteogram static output.
+    if c["mode"] != "maps" and static_formats:
+        with xr.open_dataset(c["output"] / "point.nc") as source:
             ds = source.load()
-        fig = builder(ds, c)
+        fig = meteogram(ds, c)
         try:
-            save(fig, dest / filename, c["formats"])
+            save(fig, dest / "meteogram", static_formats)
         finally:
             plt.close(fig)
 
-        topography_src = None
-        topography_zoom_src = None
-        maps_config = c.get("maps", {})
+    # Point-only mode has no spatial products or interactive map viewer.
+    if c["mode"] == "point":
+        return
 
-        if kind == "maps" and maps_config.get("topography", True):
-            # Existing topography map for the complete configured region.
-            fig = topography(c)
+    with xr.open_dataset(c["output"] / "maps.nc") as source:
+        maps_ds = source.load()
+
+    # Static combined weather maps.
+    if static_formats:
+        fig = maps(maps_ds, c)
+        try:
+            save(fig, dest / "maps", static_formats)
+        finally:
+            plt.close(fig)
+
+    topography_src = None
+    topography_zoom_src = None
+
+    def figure_to_data_uri(fig, dpi=140):
+        buffer = io.BytesIO()
+        fig.savefig(buffer, format="png", dpi=dpi, facecolor="white")
+        return "data:image/png;base64," + base64.b64encode(buffer.getvalue()).decode("ascii")
+
+    # Topography products: save to disk only if a static format is requested;
+    # otherwise render only in memory when required by the interactive HTML.
+    if maps_config.get("topography", True) and (static_formats or write_interactive):
+        fig = topography(c)
+        try:
+            if static_formats:
+                save(fig, dest / "topography", static_formats)
+            if write_interactive:
+                topography_src = figure_to_data_uri(fig)
+        finally:
+            plt.close(fig)
+
+        if maps_config.get("topography_zoom", True) and c.get("point") is not None:
+            radius_km = float(maps_config.get("topography_zoom_radius_km", 20.0))
+            zoom_region = point_zoom_region(c, radius_km=radius_km)
+            fig = topography(
+                c,
+                region=zoom_region,
+                title=f"Topography — {radius_km:g} km radius around meteogram point",
+                overlay=True,
+            )
             try:
-                save(fig, dest / "topography", c["formats"])
-                buffer = io.BytesIO()
-                fig.savefig(buffer, format="png", dpi=140, facecolor="white")
-                topography_src = (
-                    "data:image/png;base64," +
-                    base64.b64encode(buffer.getvalue()).decode("ascii")
-                )
+                if static_formats:
+                    save(fig, dest / "topography_zoom", static_formats)
+                if write_interactive:
+                    topography_zoom_src = figure_to_data_uri(fig)
             finally:
                 plt.close(fig)
 
-            # Additional point-centred zoom.  It is skipped gracefully for
-            # map-only configurations that do not define a meteogram point.
-            if maps_config.get("topography_zoom", True) and c.get("point") is not None:
-                radius_km = float(maps_config.get("topography_zoom_radius_km", 20.0))
-                zoom_region = point_zoom_region(c, radius_km=radius_km)
-                fig = topography(
-                    c,
-                    region=zoom_region,
-                    title=f"Topography — {radius_km:g} km radius around meteogram point",
-                    overlay=True,
-                )
-                try:
-                    save(fig, dest / "topography_zoom", c["formats"])
-                    buffer = io.BytesIO()
-                    fig.savefig(buffer, format="png", dpi=140, facecolor="white")
-                    topography_zoom_src = (
-                        "data:image/png;base64," +
-                        base64.b64encode(buffer.getvalue()).decode("ascii")
-                    )
-                finally:
-                    plt.close(fig)
-
-        if kind == "maps" and maps_config.get("interactive", True):
-            html_path = interactive_maps(
-                ds,
-                c,
-                dest / "maps_interactive.html",
-                topography_src=topography_src,
-                topography_zoom_src=topography_zoom_src,
-            )
-            print(f"Interactive maps: {html_path}")
+    if write_interactive:
+        html_path = interactive_maps(
+            maps_ds,
+            c,
+            dest / "maps_interactive.html",
+            topography_src=topography_src,
+            topography_zoom_src=topography_zoom_src,
+        )
+        print(f"Interactive maps: {html_path}")
 
 
 def main():

@@ -1,0 +1,30 @@
+# This is an example configuration file for generating interactive maps only plots.
+
+start: "2023-07-24T00:00:00Z"
+end: "2023-07-26T23:00:00Z"
+mode: maps
+
+region:
+  north: 39.0
+  west: 11.0
+  south: 36.0
+  east: 16.0
+
+timezone: Europe/Rome
+output: output/example_maps_interactive_only
+
+outputs:
+  png: false
+  pdf: false
+  interactive: true
+
+maps:
+  every_hours: 1
+  coastlines: true
+  borders: true
+  lakes: true
+  cities: true
+  topography: true
+  topography_zoom: false
+  interactive_dpi: 110
+  interactive_interval_ms: 900

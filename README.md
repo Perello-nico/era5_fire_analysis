@@ -1,6 +1,6 @@
 # ERA5 fire weather analysis
 
-Configurable ERA5 downloads, meteograms, regional weather maps, and topographic context maps. The topography workflow can generate both a regional terrain view and a zoomed view around the meteogram point, with an optional shapefile overlay on the zoomed map. Requires Python 3.10+.
+Configurable ERA5 point/regional downloads, processed weather datasets, meteograms, regional weather maps, and topographic context maps. The topography workflow can generate both a regional terrain view and a zoomed view around the meteogram point, with an optional shapefile overlay on the zoomed map. Requires Python 3.10+.
 
 ## Setup
 
@@ -55,6 +55,8 @@ era5-fire process --config example/example.yaml
 era5-fire plot --config example/example.yaml
 ```
 
+`run` executes download, process and plot in sequence. If all entries in `outputs` are `false`, the plotting stage is skipped automatically after the processed data files have been written.
+
 - `mode`: `point`, `maps`, or `both`. Point mode needs no region; maps mode needs no point.
 - `start`, `end`: inclusive UTC timestamps on whole hours. Explicit offsets are accepted. A date without a time means midnight, not the whole day.
 - `point`: name, latitude and longitude; extraction uses the nearest grid cell and records its coordinates.
@@ -64,9 +66,167 @@ era5-fire plot --config example/example.yaml
 - `maps.topography_zoom_radius_km`: radius of the zoom around the meteogram point in kilometres. For example, `20` produces a view extending approximately 20 km in every direction from the point.
 - `maps.topography_overlay`: optional shapefile overlay drawn only on the zoomed topography. The overlay highlights the supplied geometry but does not control the zoom extent.
 - `maps.every_hours`: interval counted from start. Alternatively `maps.times` supplies exact timestamps and takes precedence.
+- `maps.coastlines`, `maps.borders`, `maps.lakes`, `maps.cities`: enable geographic context on regional weather maps and topography maps.
+- `maps.city_min_population`, `maps.max_cities`: filter the Natural Earth populated places used for city labels.
 - `timezone`: meteogram display timezone; data and map labels remain UTC.
-- `formats`: PNG and/or PDF.
+- `outputs.png`, `outputs.pdf`: control whether static figures are written to disk.
+- `outputs.interactive`: control creation of the self-contained `maps_interactive.html` viewer. The HTML can be created without writing PNG/PDF files to disk; its images are rendered in memory and embedded in the HTML.
 - `output`: path relative to the configuration file.
+
+### Configuration modes and output combinations
+
+The configuration separates **what data are downloaded** (`mode`) from **what presentation products are written** (`outputs`). This makes it possible to use the package for data-only extraction, static figures, interactive HTML, or any combination.
+
+#### `mode: point` — point weather only
+
+Only the point-area ERA5 request is downloaded. Processing extracts the nearest ERA5 grid cell to the requested coordinates and writes `point.nc` and `point.csv`. No regional map data are requested.
+
+A data-only point configuration is:
+
+```yaml
+start: "2023-07-24T00:00:00Z"
+end: "2023-07-26T23:00:00Z"
+mode: point
+
+point:
+  name: Palermo
+  latitude: 38.12
+  longitude: 13.36
+
+timezone: Europe/Rome
+output: output/example_point_data_only
+
+outputs:
+  png: false
+  pdf: false
+  interactive: false
+```
+
+To create a meteogram from the same point data, enable one or both static formats:
+
+```yaml
+outputs:
+  png: true
+  pdf: false
+  interactive: false
+```
+
+With `mode: point`, `outputs.interactive` is not used because the interactive product is a regional map viewer.
+
+#### `mode: maps` — regional weather maps only
+
+Only the regional ERA5 request is downloaded and processed to `maps.nc`. A `point` block is not required, and no meteogram is generated.
+
+For regional data only:
+
+```yaml
+start: "2023-07-24T00:00:00Z"
+end: "2023-07-26T23:00:00Z"
+mode: maps
+
+region:
+  north: 39.0
+  west: 11.0
+  south: 36.0
+  east: 16.0
+
+timezone: Europe/Rome
+output: output/example_maps_data_only
+
+outputs:
+  png: false
+  pdf: false
+  interactive: false
+
+maps:
+  every_hours: 1
+```
+
+For an interactive regional viewer without standalone PNG/PDF figures:
+
+```yaml
+outputs:
+  png: false
+  pdf: false
+  interactive: true
+
+maps:
+  every_hours: 1
+  coastlines: true
+  borders: true
+  lakes: true
+  cities: true
+  topography: true
+  topography_zoom: false
+  interactive_dpi: 110
+  interactive_interval_ms: 900
+```
+
+The weather-map frames and topography needed by the HTML are rendered to memory and embedded as base64 images, so no temporary or final PNG files are required on disk.
+
+#### `mode: both` — point + regional weather
+
+This downloads and processes both streams independently. The output includes `point.nc`, `point.csv`, and `maps.nc`. Static figures and/or the interactive viewer can then be selected with `outputs`.
+
+A useful interactive-only configuration is:
+
+```yaml
+mode: both
+
+point:
+  name: Palermo
+  latitude: 38.12
+  longitude: 13.36
+
+region:
+  north: 39.0
+  west: 11.0
+  south: 36.0
+  east: 16.0
+
+outputs:
+  png: false
+  pdf: false
+  interactive: true
+
+maps:
+  every_hours: 1
+  topography: true
+  topography_zoom: true
+  topography_zoom_radius_km: 20
+  interactive_meteogram: true
+```
+
+This produces the processed point and regional datasets plus one self-contained interactive HTML file, without standalone PNG/PDF figures.
+
+#### Output selection
+
+The three output flags are independent:
+
+| Configuration | Result |
+| --- | --- |
+| `png: false`, `pdf: false`, `interactive: false` | processed data only; plotting is skipped |
+| `png: true`, `pdf: false`, `interactive: false` | PNG static figures |
+| `png: false`, `pdf: true`, `interactive: false` | PDF static figures |
+| `png: false`, `pdf: false`, `interactive: true` | interactive HTML only |
+| `png: true`, `pdf: false`, `interactive: true` | PNG static figures + interactive HTML |
+| `png: false`, `pdf: true`, `interactive: true` | PDF static figures + interactive HTML |
+| `png: true`, `pdf: true`, `interactive: true` | all static and interactive products |
+
+When all three flags are `false`, `era5-fire run` still performs download and processing, then skips plotting entirely. In this case a `figures/` directory is not created by the plotting stage.
+
+The preferred syntax is the `outputs` block above. The older `formats: [png, pdf]` and `maps.interactive` settings are still accepted for backward compatibility, but new configurations should use `outputs`.
+
+#### Typical example configuration files
+
+The repository can keep separate example YAML files for the most common workflows:
+
+- `example_point_data_only.yaml` — `point.nc` and `point.csv` only;
+- `example_meteogram_only.yaml` — point data plus a static meteogram;
+- `example_maps_data_only.yaml` — `maps.nc` only;
+- `example_maps_interactive_only.yaml` — regional interactive HTML only;
+- `example_both_interactive_only.yaml` — point + maps data and self-contained HTML, without standalone figures;
+- `example_everything.yaml` — point + maps data, PNG, PDF, and interactive HTML.
 
 ### Optional topography shapefile overlay
 
@@ -108,9 +268,9 @@ Point data are downloaded hourly in a small box; regional data hourly between th
 - `figures/topography.png` (and/or PDF): regional Copernicus GLO-90 elevation with hillshading and the meteogram location.
 - `figures/topography_zoom.png` (and/or PDF): topography zoom centred on the meteogram point. If `maps.topography_overlay` is configured, the shapefile is drawn on this zoomed view only.
 - `maps.nc`: hourly processed fields between the first and last selected map timestamps.
-- `figures/meteogram.png` (and/or PDF): three panels styled after `~/Codes/meteogram`: combined temperature/dewpoint and dotted RH on a secondary axis; wind speed/gusts with direction arrows; hourly precipitation bars with a cumulative precipitation line on the right axis (mm), summed from the first available hour. Fixed 18:00–06:00 night shading uses the configured timezone. VPD remains in the data exports but is not plotted.
+- `figures/meteogram.png` (and/or PDF): four panels: temperature and dew point; relative humidity on a separate panel; wind speed/gusts with direction arrows; and hourly precipitation bars with cumulative precipitation on the right axis. Relative humidity is shown as a solid line and cumulative precipitation as a grey line. Fixed 18:00–06:00 night shading uses the configured timezone. VPD remains in the data exports but is not plotted.
 - `figures/maps.png` (and/or PDF): one combined figure with a row per selected timestamp and columns for temperature, RH, wind and accumulated precipitation. Four shared discrete colourbars apply to every row. Old individual timestamp figures from earlier runs are not removed automatically.
-- `figures/maps_interactive.html`: self-contained browser viewer. The regional and zoomed topography maps are shown first, followed by the meteogram, time controls and weather maps. The time slider updates the weather-map frame and moves the vertical time marker on the meteogram. If a shapefile overlay is configured, it is visible on the zoomed topography in the HTML as well.
+- `figures/maps_interactive.html`: self-contained browser viewer. When available, the regional and zoomed topography maps are shown first, followed by the point meteogram, time controls and weather maps. The time slider updates the weather-map frame and moves the vertical time marker on the meteogram. In map-only mode there is no meteogram. If a shapefile overlay is configured, it is visible on the zoomed topography in the HTML as well. The embedded images are generated in memory, so `outputs.interactive: true` does not require `outputs.png: true`.
 
 Map palettes approximate the supplied reference screenshots; explicit colours and boundaries are in `era5_fire/plotting.py`. Temperature bands span −48 to 56°C every 4°C. RH boundaries are 5, 10, 20, …, 100%, with brown below 5%. Temperature and RH use their end colours outside these ranges. Wind shading uses km/h: 0–10 is transparent, 10–20 pale yellow, then 10 km/h bands from yellow through green to dark blue; values at or above 90 use the darkest blue. Wind barbs also use km/h (half barb 5, full barb 10, pennant 50), as labelled on the figure. Meteogram wind arrows point in the direction of motion; exported wind values remain in m/s.
 
@@ -160,6 +320,6 @@ The automated tests create temporary configurations and outputs; they do not dow
 
 Topography uses [Copernicus GLO-90](https://registry.opendata.aws/copernicus-dem/), a digital surface model including vegetation and buildings, resampled for display. It does not change the ERA5 grid or weather values. Terrain tiles require internet access on first use; subsequent runs reuse the local topography cache.
 
-The regional topography uses the configured `region`. The zoomed topography uses the meteogram point and `maps.topography_zoom_radius_km`; longitude extent is adjusted for latitude so the requested radius is approximately symmetric in kilometres. An optional `maps.topography_overlay` shapefile is reprojected to EPSG:4326 and drawn only on the zoomed view as a highlight. It does not modify the DEM, ERA5 data, or zoom extent.
+The regional topography uses the configured `region`. The zoomed topography uses the meteogram point and `maps.topography_zoom_radius_km`; longitude extent is adjusted for latitude so the requested radius is approximately symmetric in kilometres. Coastlines, borders, lakes and filtered Natural Earth city labels can be displayed using the same `maps.*` geographic-context options as the weather maps. An optional `maps.topography_overlay` shapefile is reprojected to EPSG:4326 and drawn only on the zoomed view as a highlight. It does not modify the DEM, ERA5 data, or zoom extent.
 
 The generated `maps_interactive.html` remains self-contained: weather frames, meteogram and both topography images are embedded directly in the HTML, so the file can be opened locally in a normal web browser without a web server.

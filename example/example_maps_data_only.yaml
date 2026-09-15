@@ -1,0 +1,22 @@
+# This is an example configuration file for generating maps data only plots.
+
+start: "2023-07-24T00:00:00Z"
+end: "2023-07-26T23:00:00Z"
+mode: maps
+
+region:
+  north: 39.0
+  west: 11.0
+  south: 36.0
+  east: 16.0
+
+timezone: Europe/Rome
+output: output/example_maps_data_only
+
+outputs:
+  png: false
+  pdf: false
+  interactive: false
+
+maps:
+  every_hours: 1
