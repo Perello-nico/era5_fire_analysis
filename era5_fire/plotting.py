@@ -48,7 +48,7 @@ def palette(variable):
     return cmap, BoundaryNorm(boundaries, cmap.N)
 
 
-def meteogram(ds, c, highlight_time=None):
+def meteogram(ds, c, highlight_time=None, *, aligned_maps=False):
     """Four panels: T/Td, RH, wind/gust/direction, and precipitation.
 
     If ``highlight_time`` is supplied, draw a vertical line at that valid time.
@@ -64,16 +64,15 @@ def meteogram(ds, c, highlight_time=None):
 
     tz = ZoneInfo(c["timezone"])
 
-    # Keep approximately the same overall figure size as before, but split
-    # temperature/dew point and relative humidity into separate, shorter panels.
+    # Equal-height panels keep each variable aligned with its weather map.
     fig, axes = plt.subplots(
         4, 1,
-        figsize=(13, 9),
+        figsize=(13, 13.5 if aligned_maps else 9),
         sharex=True,
-        gridspec_kw={"height_ratios": [0.95, 0.70, 0.90, 0.75]},
+        gridspec_kw={"height_ratios": [1, 1, 1, 1]},
     )
     fig.subplots_adjust(
-        left=.08, right=.92, bottom=.10, top=.80, hspace=.30
+        left=.08, right=.92, bottom=.18, top=.90, hspace=.30
     )
 
     # 1) Temperature and dew point.
@@ -214,8 +213,8 @@ def meteogram(ds, c, highlight_time=None):
 
     fig.legend(
         handles, labels,
-        loc="upper center",
-        bbox_to_anchor=(.5, .9),
+        loc="lower center",
+        bbox_to_anchor=(.5, .01),
         ncol=3,
         frameon=False,
     )
@@ -323,8 +322,17 @@ def map_accumulations(ds, c):
     return result.assign_coords(accumulation_start=("time", starts))
 
 
-def maps(ds, c, times=None, cities=None):
-    """One row per timestamp, four columns, with shared discrete legends."""
+def maps(ds, c, times=None, cities=None, layout="row"):
+    """Render ERA5 weather maps.
+
+    ``layout='row'`` preserves the static-output layout: one row per timestamp
+    and four columns (temperature, RH, wind, precipitation).
+
+    ``layout='column'`` aligns four maps with the interactive meteogram panels.
+
+    ``layout='2x2'`` is intended for the interactive viewer and renders a
+    single timestamp as a compact 2 x 2 square of weather fields.
+    """
     import cartopy.crs as ccrs
     import cartopy.feature as cfeature
 
@@ -332,8 +340,6 @@ def maps(ds, c, times=None, cities=None):
     accumulation = map_accumulations(ds, c)
     ds = ds.assign(precipitation_accumulation=accumulation)
 
-    # Static maps use all configured map times. The interactive viewer passes
-    # one time at a time so it can render one compact frame per slider step.
     selected_times = c.get("map_times") if times is None else pd.DatetimeIndex(times)
     if selected_times is not None:
         selected_times = pd.DatetimeIndex(selected_times)
@@ -342,20 +348,10 @@ def maps(ds, c, times=None, cities=None):
         ds = ds.sel(time=selected_times.values)
 
     count = ds.sizes["time"]
-    fig = plt.figure(figsize=(21, 3.8 * count + 1.5))
-    grid = fig.add_gridspec(
-        count + 1, 4,
-        height_ratios=[1] * count + [.06],
-        left=.10, right=.98,
-        top=.88 if count == 1 else .92,
-        bottom=.08 if count == 1 else .045,
-        wspace=.17, hspace=.22,
-    )
-
-    axes = np.array([
-        [fig.add_subplot(grid[row, col], projection=projection) for col in range(4)]
-        for row in range(count)
-    ])
+    if layout not in ("row", "2x2", "column"):
+        raise ValueError("Map layout must be 'row', '2x2', or 'column'")
+    if layout != "row" and count != 1:
+        raise ValueError("The column and 2x2 map layouts require exactly one timestamp")
 
     fields = [
         ("temperature", "2 m temperature (°C)"),
@@ -364,19 +360,71 @@ def maps(ds, c, times=None, cities=None):
         ("precipitation_accumulation", "Accumulated precipitation (mm)"),
     ]
 
+    # Build either the original static layout or a compact 2 x 2 layout for
+    # the browser viewer.  In both cases ``axes`` is indexed [time, field].
+    if layout == "row":
+        fig = plt.figure(figsize=(21, 3.8 * count + 1.5))
+        grid = fig.add_gridspec(
+            count + 1, 4,
+            height_ratios=[1] * count + [.06],
+            left=.10, right=.98,
+            top=.88 if count == 1 else .92,
+            bottom=.08 if count == 1 else .045,
+            wspace=.17, hspace=.22,
+        )
+        axes = np.array([
+            [fig.add_subplot(grid[row, col], projection=projection) for col in range(4)]
+            for row in range(count)
+        ])
+        colorbar_axes = [fig.add_subplot(grid[-1, col]) for col in range(4)]
+    elif layout == "column":
+        # Match the meteogram's row geometry and physical height. The HTML
+        # column ratio matches the figure widths, preserving alignment.
+        fig = plt.figure(figsize=(6, 13.5))
+        grid = fig.add_gridspec(
+            4, 1, height_ratios=[1, 1, 1, 1],
+            left=.12, right=.78, bottom=.18, top=.90, hspace=.30,
+        )
+        axes = np.array([[fig.add_subplot(grid[row, 0], projection=projection)
+                          for row in range(4)]], dtype=object)
+        colorbar_axes = []
+        for ax in axes[0]:
+            position = ax.get_position(original=True)
+            colorbar_axes.append(fig.add_axes(
+                [.83, position.y0, .025, position.height]
+            ))
+    else:
+        fig = plt.figure(figsize=(12, 10.2))
+        grid = fig.add_gridspec(
+            4, 2,
+            height_ratios=[1, .055, 1, .055],
+            left=.075, right=.975, top=.90, bottom=.075,
+            wspace=.16, hspace=.22,
+        )
+        map_axes = [
+            fig.add_subplot(grid[0, 0], projection=projection),
+            fig.add_subplot(grid[0, 1], projection=projection),
+            fig.add_subplot(grid[2, 0], projection=projection),
+            fig.add_subplot(grid[2, 1], projection=projection),
+        ]
+        axes = np.array([map_axes], dtype=object)
+        colorbar_axes = [
+            fig.add_subplot(grid[1, 0]),
+            fig.add_subplot(grid[1, 1]),
+            fig.add_subplot(grid[3, 0]),
+            fig.add_subplot(grid[3, 1]),
+        ]
+
     r = c["region"]
     maps_config = c.get("maps", {})
     if cities is None:
         cities = _load_map_cities(r, maps_config)
 
-    # Point corresponding to the meteogram. If exact grid coordinates are
-    # supplied they are preferred; otherwise the requested coordinates are used.
     p = c.get("point")
     if p is not None:
         point_lon = p.get("grid_longitude", p["longitude"])
         point_lat = p.get("grid_latitude", p["latitude"])
 
-    # Higher-resolution geographic features.
     admin1 = cfeature.NaturalEarthFeature(
         category="cultural",
         name="admin_1_states_provinces_lines",
@@ -384,7 +432,9 @@ def maps(ds, c, times=None, cities=None):
         facecolor="none",
     )
 
-    artists = []
+    artists = [None] * 4
+    point_legend_handle = None
+
     for row, t in enumerate(ds.time.values):
         frame = ds.sel(time=t)
 
@@ -399,15 +449,26 @@ def maps(ds, c, times=None, cities=None):
                 frame.longitude, frame.latitude, values,
                 transform=projection, shading="auto", cmap=cmap, norm=norm,
             )
+            if artists[col] is None:
+                artists[col] = art
 
             if name == "precipitation_accumulation":
-                start = pd.Timestamp(accumulation.accumulation_start.sel(time=t).values)
-                ax.text(.5, 1.02,
-                        f"{start:%d %b %H:%M} – {pd.Timestamp(t):%d %b %H:%M} UTC",
-                        transform=ax.transAxes, ha="center", fontsize=8)
+                start_time = pd.Timestamp(
+                    accumulation.accumulation_start.sel(time=t).values
+                )
+                ax.text(
+                    .5, 1.015,
+                    f"{start_time:%d %b %H:%M} – {pd.Timestamp(t):%d %b %H:%M} UTC",
+                    transform=ax.transAxes, ha="center", fontsize=8,
+                )
 
-            if row == 0:
-                artists.append(art)
+            if layout == "column":
+                ax.text(.5, 1.14 if name == "precipitation_accumulation" else 1.05,
+                        label, transform=ax.transAxes, ha="center", va="bottom",
+                        fontsize=10)
+            elif layout == "2x2":
+                ax.set_title(label, fontsize=10, pad=8)
+            elif row == 0:
                 position = ax.get_position()
                 fig.text(
                     (position.x0 + position.x1) / 2,
@@ -421,19 +482,21 @@ def maps(ds, c, times=None, cities=None):
                 crs=projection,
             )
 
-            # Better coastlines and geographic context.
             if maps_config.get("coastlines", True):
                 ax.coastlines(resolution="10m", linewidth=.8, color="black", zorder=4)
             if maps_config.get("borders", True):
-                ax.add_feature(cfeature.BORDERS.with_scale("10m"), linewidth=.55,
-                               edgecolor="black", zorder=4)
+                ax.add_feature(
+                    cfeature.BORDERS.with_scale("10m"),
+                    linewidth=.55, edgecolor="black", zorder=4,
+                )
             if maps_config.get("admin1", False):
                 ax.add_feature(admin1, linewidth=.35, edgecolor="0.25", zorder=4)
             if maps_config.get("lakes", True):
-                ax.add_feature(cfeature.LAKES.with_scale("10m"), facecolor="none",
-                               edgecolor="0.3", linewidth=.45, zorder=4)
+                ax.add_feature(
+                    cfeature.LAKES.with_scale("10m"),
+                    facecolor="none", edgecolor="0.3", linewidth=.45, zorder=4,
+                )
 
-            # location inspected in the meteogram.
             if p is not None:
                 point_marker, = ax.plot(
                     point_lon, point_lat,
@@ -442,33 +505,31 @@ def maps(ds, c, times=None, cities=None):
                     markeredgewidth=.8,
                     transform=projection, zorder=10,
                 )
-                if row == 0 and col == 0:
-                    fig.legend(
-                        handles=[point_marker], labels=["Meteogram location"],
-                        loc="upper left", bbox_to_anchor=(.01, .995),
-                        frameon=True, facecolor="white", edgecolor="0.8",
-                        fontsize=10,
-                    )
+                if point_legend_handle is None:
+                    point_legend_handle = point_marker
 
-            # Optional city labels, filtered to avoid overcrowding.
             for _, city_name, city_lon, city_lat in cities:
-                ax.plot(city_lon, city_lat, marker="o", markersize=2.0,
-                        color="black", transform=projection, zorder=8)
+                ax.plot(
+                    city_lon, city_lat,
+                    marker="o", markersize=2.0, color="black",
+                    transform=projection, zorder=8,
+                )
                 ax.text(
                     city_lon, city_lat, f"  {city_name}",
                     transform=projection,
                     fontsize=7, color="black",
                     ha="left", va="center", zorder=8,
-                    bbox={"facecolor": "white", "alpha": .55,
-                          "edgecolor": "none", "pad": .5},
+                    bbox={
+                        "facecolor": "white", "alpha": .55,
+                        "edgecolor": "none", "pad": .5,
+                    },
                 )
 
             gl = ax.gridlines(draw_labels=True, alpha=.25, linewidth=.6)
             gl.top_labels = gl.right_labels = False
             gl.xlabel_style = gl.ylabel_style = {"size": 8}
 
-            # This is the VALID time of each map row.
-            if col == 0:
+            if layout == "row" and col == 0:
                 position = ax.get_position()
                 fig.text(
                     .025,
@@ -486,19 +547,15 @@ def maps(ds, c, times=None, cities=None):
             latitude=slice(None, None, stride),
             longitude=slice(None, None, stride),
         )
-        lon, lat = np.meshgrid(wind.longitude, wind.latitude)
+        lon, lat = np.meshgrid(wind.longitude.values, wind.latitude.values)
+        u = wind.u10.transpose("latitude", "longitude").values * 3.6
+        v = wind.v10.transpose("latitude", "longitude").values * 3.6
 
-        # Explicit km/h increments: half barb=5, full barb=10, pennant=50.
         axes[row, 2].barbs(
-            lon, lat,
-            wind.u10.transpose("latitude", "longitude").values * 3.6,
-            wind.v10.transpose("latitude", "longitude").values * 3.6,
+            lon, lat, u, v,
             transform=projection,
             length=4.5, linewidth=.5,
             barb_increments={"half": 5, "full": 10, "flag": 50},
-            # Matplotlib flattens U/V internally.  Flatten flip_barb as well,
-            # otherwise a one-row grid (shape 1 x N) can be misinterpreted as
-            # a single value and fail during NumPy broadcasting.
             flip_barb=(lat < 0).ravel(),
             zorder=7,
         )
@@ -508,17 +565,37 @@ def maps(ds, c, times=None, cities=None):
         ticks = bounds[::2] if name == "temperature" else bounds
         cb = fig.colorbar(
             artists[col],
-            cax=fig.add_subplot(grid[-1, col]),
-            orientation="horizontal",
+            cax=colorbar_axes[col],
+            orientation="vertical" if layout == "column" else "horizontal",
             label=label,
             ticks=ticks,
             spacing="uniform",
             drawedges=True,
         )
         cb.ax.tick_params(labelsize=7)
+        if layout != "row":
+            cb.set_label(label, fontsize=8)
+
+    if point_legend_handle is not None:
+        if layout != "row":
+            fig.legend(
+                handles=[point_legend_handle], labels=["Meteogram location"],
+                loc="lower center" if layout == "column" else "upper left",
+                bbox_to_anchor=(.5, .03) if layout == "column" else (.07, .975),
+                frameon=True, facecolor="white", edgecolor="0.8", fontsize=8,
+            )
+        else:
+            fig.legend(
+                handles=[point_legend_handle], labels=["Meteogram location"],
+                loc="upper left", bbox_to_anchor=(.01, .995),
+                frameon=True, facecolor="white", edgecolor="0.8", fontsize=10,
+            )
 
     reference_time = _map_reference_time(ds, c)
     title = "ERA5 weather"
+    if layout != "row":
+        t = pd.Timestamp(ds.time.values[0])
+        title += f"\nValid {t:%d %b %Y %H:%M UTC}" if layout == "column" else f" — valid {t:%d %b %Y %H:%M UTC}"
     if reference_time is not None:
         title += f"\nReference time: {reference_time:%d %b %Y %H:%M UTC}"
     fig.suptitle(title, fontsize=13)
@@ -709,10 +786,11 @@ def topography(c, region=None, title=None, overlay=False):
 def interactive_maps(ds, c, output_path, topography_src=None, topography_zoom_src=None):
     """Create a self-contained HTML viewer synchronized with the meteogram.
 
-    The map sequence is rendered with the same Matplotlib/Cartopy ``maps``
-    function used for static output. A single meteogram PNG is embedded above
-    the time controls and maps. JavaScript moves a vertical line across that meteogram whenever
-    the map slider changes. No web server is required.
+    The browser layout places topography first, then a two-column workspace
+    with the point meteogram on the left and four vertically aligned maps on the
+    right. The shared time controls span both columns below them. JavaScript
+    moves a vertical line across the meteogram whenever the map slider changes.
+    No web server is required.
     """
     from pathlib import Path
 
@@ -742,16 +820,17 @@ def interactive_maps(ds, c, output_path, topography_src=None, topography_zoom_sr
     total = len(frame_times)
     print(f"Generating {total} interactive map frames...")
 
+    interactive_layout = maps_config.get("interactive_map_layout", "column")
     for i, t in enumerate(frame_times, start=1):
         print(f"  Interactive frame {i}/{total}: {t:%Y-%m-%d %H:%M} UTC")
-        fig = maps(ds, c, times=[t], cities=cities)
+        fig = maps(ds, c, times=[t], cities=cities, layout=interactive_layout)
         buffer = io.BytesIO()
         try:
             fig.savefig(
                 buffer,
                 format="png",
                 dpi=dpi,
-                bbox_inches="tight",
+                bbox_inches=None if interactive_layout == "column" else "tight",
                 facecolor="white",
             )
         finally:
@@ -789,7 +868,7 @@ def interactive_maps(ds, c, output_path, topography_src=None, topography_zoom_sr
             meteogram_axis_start_ms = int(axis_start.timestamp() * 1000)
             meteogram_axis_end_ms = int(axis_end.timestamp() * 1000)
 
-            fig = meteogram(point_ds, c)
+            fig = meteogram(point_ds, c, aligned_maps=interactive_layout == "column")
             buffer = io.BytesIO()
             try:
                 fig.savefig(
@@ -839,7 +918,7 @@ def interactive_maps(ds, c, output_path, topography_src=None, topography_zoom_sr
     color: CanvasText;
   }
   main {
-    width: min(1500px, 100%);
+    width: min(1750px, 100%);
     margin: 0 auto;
     padding: 20px;
   }
@@ -853,25 +932,47 @@ def interactive_maps(ds, c, output_path, topography_src=None, topography_zoom_sr
     margin-bottom: 14px;
   }
   .panel-heading { padding: 12px 16px 0; }
+  .workspace {
+    display: grid;
+    grid-template-columns: minmax(0, .9fr) minmax(0, 1.35fr);
+    gap: 14px;
+    align-items: start;
+    margin-bottom: 14px;
+  }
+  .workspace > .panel { margin-bottom: 0; min-width: 0; }
+  .workspace.aligned-maps { grid-template-columns: minmax(0, 13fr) minmax(0, 6fr); }
+  .workspace.aligned-maps .map-wrap { padding: 0; }
+  .workspace.no-meteogram { grid-template-columns: 1fr; }
+  .workspace.no-meteogram #meteogram-panel { display: none; }
   .map-wrap {
     min-height: 180px;
     display: grid;
     place-items: center;
     background: white;
+    padding: 4px;
   }
   #map-image { display: block; width: 100%; height: auto; }
   .meteogram-wrap {
     position: relative;
-    width: min(1050px, 100%);
+    width: 100%;
     margin: 0 auto;
     background: white;
     overflow: hidden;
   }
   #meteogram-image { display: block; width: 100%; height: auto; }
+  .meteogram-seek {
+    position: absolute;
+    inset: 10% 8% 18%;
+    cursor: ew-resize;
+    touch-action: none;
+    user-select: none;
+    z-index: 6;
+  }
+  .meteogram-seek:focus-visible { outline: 2px solid Highlight; }
   #meteogram-line {
     position: absolute;
-    top: 20%;
-    bottom: 10%;
+    top: 10%;
+    bottom: 18%;
     width: 0;
     border-left: 2px solid black;
     pointer-events: none;
@@ -929,6 +1030,9 @@ def interactive_maps(ds, c, output_path, topography_src=None, topography_zoom_sr
     height: auto;
     background: white;
   }
+  @media (max-width: 1100px) {
+    .workspace, .workspace.aligned-maps { grid-template-columns: 1fr; }
+  }
   @media (max-width: 900px) {
     .topography-grid { grid-template-columns: 1fr; }
   }
@@ -940,11 +1044,6 @@ def interactive_maps(ds, c, output_path, topography_src=None, topography_zoom_sr
   <h1 id="page-title">ERA5 weather maps</h1>
 
   __TOPOGRAPHY_PANEL__
-
-  <section id="meteogram-panel" class="panel">
-    <div class="panel-heading"><h2>Point meteogram</h2></div>
-    <div id="meteogram-content"></div>
-  </section>
 
   <section id="time-controls-panel" class="panel" aria-label="Time controls">
     <div class="controls">
@@ -965,17 +1064,27 @@ def interactive_maps(ds, c, output_path, topography_src=None, topography_zoom_sr
         <button id="next" type="button">Next</button>
       </div>
       <div class="hint">
-        The vertical line in the meteogram follows the valid time selected for the maps.
+        The selected valid time updates the four weather maps and the vertical marker in the meteogram.
+        Click or drag across the meteogram plots to select the nearest map time.
       </div>
     </div>
   </section>
 
-  <section class="panel" aria-label="Interactive ERA5 map viewer">
-    <div class="panel-heading"><h2>Spatial fields</h2></div>
-    <div class="map-wrap">
-      <img id="map-image" alt="ERA5 temperature, relative humidity, wind and accumulated precipitation maps">
-    </div>
-  </section>
+  <div class="workspace __WORKSPACE_CLASS__">
+    <section id="meteogram-panel" class="panel">
+      <div class="panel-heading"><h2>Point meteogram</h2></div>
+      <div id="meteogram-content"></div>
+    </section>
+
+    <section id="spatial-panel" class="panel" aria-label="Interactive ERA5 map viewer">
+      <div class="panel-heading"><h2>Spatial fields</h2></div>
+      <div class="map-wrap">
+        <img id="map-image" alt="ERA5 temperature, relative humidity, wind and accumulated precipitation maps">
+      </div>
+    </section>
+  </div>
+
+
 
 
 
@@ -1003,6 +1112,7 @@ pageTitle.textContent = locationName + " - ERA5 weather";
 slider.max = String(Math.max(0, frames.length - 1));
 
 let meteogramLine = null;
+let meteogramSeek = null;
 if (meteogramSrc !== null && meteogramAxisStart !== null && meteogramAxisEnd !== null) {
   const wrap = document.createElement("div");
   wrap.className = "meteogram-wrap";
@@ -1011,6 +1121,7 @@ if (meteogramSrc !== null && meteogramAxisStart !== null && meteogramAxisEnd !==
   metImage.id = "meteogram-image";
   metImage.alt = "ERA5 point meteogram";
   metImage.src = meteogramSrc;
+  metImage.draggable = false;
 
   meteogramLine = document.createElement("div");
   meteogramLine.id = "meteogram-line";
@@ -1018,7 +1129,62 @@ if (meteogramSrc !== null && meteogramAxisStart !== null && meteogramAxisEnd !==
 
   wrap.appendChild(metImage);
   wrap.appendChild(meteogramLine);
+  meteogramSeek = document.createElement("div");
+  meteogramSeek.className = "meteogram-seek";
+  meteogramSeek.tabIndex = 0;
+  meteogramSeek.setAttribute("role", "slider");
+  meteogramSeek.setAttribute("aria-label", "Meteogram valid time");
+  meteogramSeek.setAttribute("aria-valuemin", "0");
+  meteogramSeek.setAttribute("aria-valuemax", String(frames.length - 1));
+  meteogramSeek.title = "Click or drag to select a map time; use arrow keys to step";
+  wrap.appendChild(meteogramSeek);
   meteogramContent.appendChild(wrap);
+
+  let activePointer = null;
+  function seekAt(clientX) {
+    const bounds = meteogramSeek.getBoundingClientRect();
+    if (!(bounds.width > 0)) return;
+    const fraction = Math.max(0, Math.min(1, (clientX - bounds.left) / bounds.width));
+    const timestamp = meteogramAxisStart + fraction * (meteogramAxisEnd - meteogramAxisStart);
+    let nearest = 0;
+    for (let i = 1; i < frames.length; i++) {
+      if (Math.abs(frames[i].timestamp_ms - timestamp) <
+          Math.abs(frames[nearest].timestamp_ms - timestamp)) nearest = i;
+    }
+    showFrame(nearest);
+  }
+  meteogramSeek.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0 || activePointer !== null) return;
+    event.preventDefault();
+    stopPlayback();
+    meteogramSeek.focus({preventScroll: true});
+    activePointer = event.pointerId;
+    meteogramSeek.setPointerCapture(activePointer);
+    seekAt(event.clientX);
+  });
+  meteogramSeek.addEventListener("pointermove", (event) => {
+    if (event.pointerId === activePointer) seekAt(event.clientX);
+  });
+  meteogramSeek.addEventListener("pointerup", (event) => {
+    if (event.pointerId !== activePointer) return;
+    seekAt(event.clientX);
+    activePointer = null;
+    meteogramSeek.releasePointerCapture(event.pointerId);
+  });
+  for (const eventName of ["pointercancel", "lostpointercapture"]) {
+    meteogramSeek.addEventListener(eventName, (event) => {
+      if (event.pointerId === activePointer) activePointer = null;
+    });
+  }
+  meteogramSeek.addEventListener("keydown", (event) => {
+    const targets = {ArrowLeft: index - 1, ArrowDown: index - 1,
+                     ArrowRight: index + 1, ArrowUp: index + 1,
+                     Home: 0, End: frames.length - 1};
+    if (!(event.key in targets)) return;
+    event.preventDefault();
+    stopPlayback();
+    showFrame(targets[event.key]);
+  });
 } else {
   const note = document.createElement("div");
   note.className = "unavailable";
@@ -1051,6 +1217,10 @@ function showFrame(newIndex) {
   counter.textContent = (index + 1) + " / " + frames.length;
   slider.value = String(index);
   moveMeteogramLine(frame.timestamp_ms);
+  if (meteogramSeek !== null) {
+    meteogramSeek.setAttribute("aria-valuenow", String(index));
+    meteogramSeek.setAttribute("aria-valuetext", frame.utc);
+  }
 }
 
 function stopPlayback() {
@@ -1119,7 +1289,11 @@ showFrame(0);
             '<div class="topography-grid">' + ''.join(terrain_items) + '</div>'
             '</section>'
         )
+    workspace_class = "aligned-maps" if interactive_layout == "column" else ""
+    if meteogram_src is None:
+        workspace_class += " no-meteogram"
     document = (document.replace("__TOPOGRAPHY_PANEL__", terrain_panel)
+                .replace("__WORKSPACE_CLASS__", workspace_class)
                 .replace("__FRAMES__", frames_json)
                 .replace("__TITLE__", title_json)
                 .replace("__INTERVAL__", str(interval_ms))

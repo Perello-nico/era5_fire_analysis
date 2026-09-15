@@ -35,4 +35,5 @@ maps:
   interactive_dpi: 110
   interactive_meteogram_dpi: 110
   interactive_interval_ms: 900
+  interactive_map_layout: column  # column, 2x2, or row
   interactive_meteogram: true

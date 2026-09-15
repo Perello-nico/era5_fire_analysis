@@ -36,7 +36,7 @@ def test_meteorology():
 
 
 def test_pipeline(tmp_path, monkeypatch):
-    monkeypatch.setattr("era5_fire.topography.elevation", lambda c: (
+    monkeypatch.setattr("era5_fire.topography.elevation", lambda c, region=None: (
         np.arange(100, dtype=float).reshape(10, 10), (12, 14, 37, 39)))
     path = tmp_path / "case.yaml"
     path.write_text(yaml.safe_dump({"start": "2023-07-31T12:00Z", "end": "2023-08-01T12:00Z",
@@ -64,10 +64,11 @@ def test_pipeline(tmp_path, monkeypatch):
         assert np.isnan(ds.precipitation_24h.values[22])
         assert ds.precipitation_24h.values[23] == 24
     plot(c)
-    assert len(list((c["output"] / "figures").glob("*.png"))) == 3
+    assert len(list((c["output"] / "figures").glob("*.png"))) == 4
     html = (c["output"] / "figures" / "maps_interactive.html").read_text()
+    assert html.index('aria-label="Topography"') < html.index('id="time-controls-panel"') < html.index('id="meteogram-panel"')
     assert 'aria-label="Topography"' in html
-    assert html.index('id="map-image"') < html.index('aria-label="Topography"')
+    assert html.index('aria-label="Topography"') < html.index('id="map-image"')
     assert (c["output"] / "point.csv").exists()
 
 
@@ -137,6 +138,23 @@ def test_plot_palettes_and_layout():
         np.testing.assert_allclose(barbs.v, -18)  # m/s converted to km/h
         np.testing.assert_allclose(ax.collections[0].get_array(), 18)
     plt.close(fig)
+    column = maps(ds, c, times=times[:1], layout="column")
+    aligned = meteogram(ds.sel(latitude=38, longitude=13), c, aligned_maps=True)
+    column.canvas.draw()
+    aligned.canvas.draw()
+    # Compare rendered row centres; Cartopy may shrink maps to preserve aspect.
+    for map_ax, point_ax in zip(column.axes[:4], aligned.axes[:4]):
+        map_box, point_box = map_ax.get_position(), point_ax.get_position()
+        assert (map_box.y0 + map_box.y1) / 2 == pytest.approx(
+            (point_box.y0 + point_box.y1) / 2)
+    for figure in (column, aligned):
+        boxes = [ax.get_position() for ax in figure.axes[:4]]
+        np.testing.assert_allclose([box.height for box in boxes], boxes[0].height)
+        np.testing.assert_allclose([box.width for box in boxes], boxes[0].width)
+    assert column.get_figheight() == aligned.get_figheight()
+    assert aligned.get_figheight() < 16
+    plt.close(column)
+    plt.close(aligned)
     fig = meteogram(ds.sel(latitude=38, longitude=13), c)
     assert len(fig.axes) == 5  # Three panels plus RH and accumulated rain axes
     labels = [line.get_label() for ax in fig.axes for line in ax.lines]
