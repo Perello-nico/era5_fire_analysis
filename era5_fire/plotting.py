@@ -2,6 +2,8 @@
 import base64
 import io
 import json
+from functools import lru_cache
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import matplotlib
@@ -434,6 +436,7 @@ def maps(ds, c, times=None, cities=None, layout="row"):
 
     artists = [None] * 4
     point_legend_handle = None
+    overlay_legend_handle = None
 
     for row, t in enumerate(ds.time.values):
         frame = ds.sel(time=t)
@@ -496,6 +499,13 @@ def maps(ds, c, times=None, cities=None, layout="row"):
                     cfeature.LAKES.with_scale("10m"),
                     facecolor="none", edgecolor="0.3", linewidth=.45, zorder=4,
                 )
+
+            overlay_handle = _plot_overlay(
+                ax, c, [r["west"], r["east"], r["south"], r["north"]], projection,
+                map_type="weather",
+            )
+            if overlay_handle is not None:
+                overlay_legend_handle = overlay_handle
 
             if p is not None:
                 point_marker, = ax.plot(
@@ -576,17 +586,23 @@ def maps(ds, c, times=None, cities=None, layout="row"):
         if layout != "row":
             cb.set_label(label, fontsize=8)
 
+    legend_handles = []
     if point_legend_handle is not None:
+        point_legend_handle.set_label("Meteogram location")
+        legend_handles.append(point_legend_handle)
+    if overlay_legend_handle is not None:
+        legend_handles.append(overlay_legend_handle)
+    if legend_handles:
         if layout != "row":
             fig.legend(
-                handles=[point_legend_handle], labels=["Meteogram location"],
+                handles=legend_handles,
                 loc="lower center" if layout == "column" else "upper left",
                 bbox_to_anchor=(.5, .03) if layout == "column" else (.07, .975),
                 frameon=True, facecolor="white", edgecolor="0.8", fontsize=8,
             )
         else:
             fig.legend(
-                handles=[point_legend_handle], labels=["Meteogram location"],
+                handles=legend_handles,
                 loc="upper left", bbox_to_anchor=(.01, .995),
                 frameon=True, facecolor="white", edgecolor="0.8", fontsize=10,
             )
@@ -603,63 +619,77 @@ def maps(ds, c, times=None, cities=None, layout="row"):
     return fig
 
 
-def _plot_topography_overlay(ax, c, extent, projection):
-    """Plot the configured vector overlay and return a legend handle.
+def _overlay_file_key(path):
+    """Invalidate cached geometry when the vector file or shapefile sidecars change."""
+    path = Path(path).resolve()
+    files = sorted(path.parent.glob(path.stem + ".*")) if path.suffix.lower() == ".shp" else [path]
+    return str(path), tuple((str(p), p.stat().st_mtime_ns, p.stat().st_size) for p in files)
 
-    The overlay is intentionally used only when requested by the caller; the
-    CLI enables it for the point-centred zoom and leaves the regional
-    topography map untouched. Vector data are reprojected to EPSG:4326 before
-    plotting.
-    """
-    overlay = c.get("maps", {}).get("topography_overlay")
-    if not overlay:
-        return None
 
-    try:
-        import geopandas as gpd
-        from shapely.geometry import box
-        from matplotlib.lines import Line2D
-    except ImportError as error:
-        raise ImportError(
-            "Topography shapefile overlays require geopandas and shapely"
-        ) from error
+@lru_cache(maxsize=4)
+def _load_overlay_geometry(file_key):
+    import geopandas as gpd
 
-    path = overlay["path"]
+    path = file_key[0]
     gdf = gpd.read_file(path)
     if gdf.crs is None:
-        raise ValueError(f"Topography overlay has no CRS: {path}")
+        raise ValueError(f"Shapefile overlay has no CRS: {path}")
     gdf = gdf.to_crs("EPSG:4326")
-    gdf = gdf[gdf.geometry.notna() & ~gdf.geometry.is_empty].copy()
+    return gdf[gdf.geometry.notna() & ~gdf.geometry.is_empty]
 
+
+@lru_cache(maxsize=16)
+def _overlay_coordinates(file_key, extent):
+    """Prepare reusable boundary/point arrays once per file and map extent."""
+    from shapely.geometry import box
+
+    gdf = _load_overlay_geometry(file_key)
     west, east, south, north = extent
-    viewport = box(west, south, east, north)
-    gdf = gdf[gdf.geometry.intersects(viewport)].copy()
-    if gdf.empty:
-        print(f"Topography overlay does not intersect the zoom map: {path}")
+    gdf = gdf[gdf.geometry.intersects(box(west, south, east, north))]
+    segments, points = [], []
+
+    def collect(geom):
+        if geom.geom_type == "Polygon":
+            collect(geom.boundary)
+        elif geom.geom_type in ("MultiPolygon", "MultiLineString", "MultiPoint", "GeometryCollection"):
+            for part in geom.geoms:
+                collect(part)
+        elif geom.geom_type in ("LineString", "LinearRing"):
+            segments.append(np.asarray(geom.coords)[:, :2])
+        elif geom.geom_type == "Point":
+            points.append((geom.x, geom.y))
+
+    for geom in gdf.geometry:
+        collect(geom)
+    return segments, np.asarray(points).reshape(-1, 2)
+
+
+def _plot_overlay(ax, c, extent, projection, map_type):
+    """Add cached geometry without GeoPandas' per-panel plotting/draw overhead."""
+    overlay = c.get("maps", {}).get("overlay")
+    if not overlay or not overlay.get(map_type, False):
+        return None
+
+    from matplotlib.collections import LineCollection
+    from matplotlib.lines import Line2D
+
+    segments, points = _overlay_coordinates(_overlay_file_key(overlay["path"]), tuple(extent))
+    if not segments and not len(points):
         return None
 
     color = overlay.get("edgecolor", "#d7191c")
     linewidth = float(overlay.get("linewidth", 2.0))
     alpha = float(overlay.get("alpha", 1.0))
-    zorder = 15
-
-    geom_type = gdf.geometry.geom_type
-    polygon_mask = geom_type.isin(["Polygon", "MultiPolygon"])
-    line_mask = geom_type.isin(["LineString", "MultiLineString"])
-    point_mask = geom_type.isin(["Point", "MultiPoint"])
-
-    if polygon_mask.any():
-        gdf.loc[polygon_mask].boundary.plot(
-            ax=ax, color=color, linewidth=linewidth, alpha=alpha, zorder=zorder
-        )
-    if line_mask.any():
-        gdf.loc[line_mask].plot(
-            ax=ax, color=color, linewidth=linewidth, alpha=alpha, zorder=zorder
-        )
-    if point_mask.any():
-        gdf.loc[point_mask].plot(
-            ax=ax, color=color, markersize=max(12, linewidth * 10),
-            alpha=alpha, zorder=zorder
+    if segments:
+        ax.add_collection(LineCollection(
+            segments, colors=color, linewidths=linewidth, alpha=alpha,
+            transform=projection, zorder=15,
+        ), autolim=False)
+    if len(points):
+        ax.scatter(
+            points[:, 0], points[:, 1], color=color,
+            s=max(12, linewidth * 10), alpha=alpha,
+            transform=projection, zorder=15,
         )
 
     return Line2D(
@@ -668,13 +698,13 @@ def _plot_topography_overlay(ax, c, extent, projection):
     )
 
 
-def topography(c, region=None, title=None, overlay=False):
+def topography(c, region=None, title=None):
     """Render a static shaded-elevation panel for a region.
 
     By default this uses ``c['region']`` (the existing general-area map).
     Passing ``region`` allows the same renderer to create a point-centred zoom.
-    If ``overlay`` is true, the configured ``maps.topography_overlay`` vector
-    is drawn as a highlight on top of the elevation map.
+    ``maps.overlay.topography`` enables the shapefile on both regional and
+    zoomed topography maps.
     """
     import cartopy.crs as ccrs
     from matplotlib.colors import LightSource, Normalize
@@ -760,10 +790,11 @@ def topography(c, region=None, title=None, overlay=False):
         )
         legend_handles.append(point_handle)
 
-    if overlay:
-        overlay_handle = _plot_topography_overlay(ax, c, extent, projection)
-        if overlay_handle is not None:
-            legend_handles.append(overlay_handle)
+    overlay_handle = _plot_overlay(
+        ax, c, extent, projection, map_type="topography",
+    )
+    if overlay_handle is not None:
+        legend_handles.append(overlay_handle)
 
     if legend_handles:
         ax.legend(handles=legend_handles, loc="upper left")

@@ -1,6 +1,6 @@
 # ERA5 fire weather analysis
 
-Configurable ERA5 point/regional downloads, processed weather datasets, meteograms, regional weather maps, and topographic context maps. The topography workflow can generate both a regional terrain view and a zoomed view around the meteogram point, with an optional shapefile overlay on the zoomed map. Requires Python 3.10+.
+Configurable ERA5 point/regional downloads, processed weather datasets, meteograms, regional weather maps, and topographic context maps. The topography workflow can generate both a regional terrain view and a zoomed view around the meteogram point, with an optional shapefile overlay independently selectable for topography and weather maps. Requires Python 3.10+.
 
 ## Setup
 
@@ -64,7 +64,7 @@ era5-fire plot --config example/example.yaml
 - `maps.topography`: enable the regional shaded-elevation map (default `true`). First use downloads Copernicus GLO-90 tiles; subsequent plots reuse `raw/topography/`. Set to `false` to skip terrain downloads and rendering.
 - `maps.topography_zoom`: enable the point-centred topographic zoom (default `true` when topography is enabled).
 - `maps.topography_zoom_radius_km`: radius of the zoom around the meteogram point in kilometres. For example, `20` produces a view extending approximately 20 km in every direction from the point.
-- `maps.topography_overlay`: optional shapefile overlay drawn only on the zoomed topography. The overlay highlights the supplied geometry but does not control the zoom extent.
+- `maps.overlay`: optional shapefile overlay. Set `topography: true` for both regional and zoomed topography, and `weather: true` for every weather panel. Both switches default to `false`. The overlay highlights the supplied geometry but does not control the zoom extent.
 - `maps.every_hours`: interval counted from start. Alternatively `maps.times` supplies exact timestamps and takes precedence.
 - `maps.coastlines`, `maps.borders`, `maps.lakes`, `maps.cities`: enable geographic context on regional weather maps and topography maps.
 - `maps.city_min_population`, `maps.max_cities`: filter the Natural Earth populated places used for city labels.
@@ -228,9 +228,9 @@ The repository can keep separate example YAML files for the most common workflow
 - `example_both_interactive_only.yaml` — point + maps data and self-contained HTML, without standalone figures;
 - `example_everything.yaml` — point + maps data, PNG, PDF, and interactive HTML.
 
-### Optional topography shapefile overlay
+### Optional shapefile overlay
 
-To highlight an area on the zoomed topography, add a `topography_overlay` block under `maps`:
+To highlight an area on all maps, add a `overlay` block under `maps`:
 
 ```yaml
 maps:
@@ -238,7 +238,9 @@ maps:
   topography_zoom: true
   topography_zoom_radius_km: 20
 
-  topography_overlay:
+  overlay:
+    topography: true
+    weather: true
     path: ../data/fire_perimeter.shp
     edgecolor: "#d7191c"
     linewidth: 2.0
@@ -248,13 +250,18 @@ maps:
 
 The overlay is intended as a visual highlight only:
 
-- the regional topography remains unchanged;
+- `topography` controls the overlay on both regional and zoomed topography;
+- `weather` controls the overlay on every weather panel, including workflows with topography disabled;
+- both switches default to `false`; when both are false (or the block is omitted), no shapefile or GeoPandas is required;
+- the same choices apply to PNG, PDF, and interactive HTML;
 - the zoom remains centred on the meteogram point;
 - the shapefile geometry does not redefine the zoom extent;
 - polygon layers are drawn as boundaries/perimeters, so the terrain remains visible inside the polygon;
 - line and point layers can also be displayed;
 - the shapefile CRS must be defined; it is reprojected to EPSG:4326 for plotting;
 - the `.shp`, `.dbf`, `.shx`, `.prj` and any other required sidecar files must remain together.
+
+Overlay geometry is cached and reused across panels and HTML frames during plotting, without simplifying the shapefile boundaries. Changes to the source file or shapefile sidecars invalidate the cache.
 
 The overlay path is resolved relative to the YAML configuration file. The overlay uses GeoPandas, so the environment must include `geopandas` and its normal geospatial dependencies.
 
@@ -266,11 +273,11 @@ Point data are downloaded hourly in a small box; regional data hourly between th
 - `raw/`: original downloads and JSON request metadata.
 - `point.nc`, `point.csv`: temperature/dewpoint (°C), RH (%), wind/gust (m/s), direction (degrees), precipitation (mm), VPD (kPa), and trailing 24-hour precipitation. CSV timestamps include UTC offsets; NetCDF times are UTC.
 - `figures/topography.png` (and/or PDF): regional Copernicus GLO-90 elevation with hillshading and the meteogram location.
-- `figures/topography_zoom.png` (and/or PDF): topography zoom centred on the meteogram point. If `maps.topography_overlay` is configured, the shapefile is drawn on this zoomed view only.
+- `figures/topography_zoom.png` (and/or PDF): topography zoom centred on the meteogram point. If `maps.overlay` is configured, the shapefile is drawn here when `maps.overlay.topography: true`.
 - `maps.nc`: hourly processed fields between the first and last selected map timestamps.
 - `figures/meteogram.png` (and/or PDF): four panels: temperature and dew point; relative humidity on a separate panel; wind speed/gusts with direction arrows; and hourly precipitation bars with cumulative precipitation on the right axis. Relative humidity is shown as a solid line and cumulative precipitation as a grey line. Fixed 18:00–06:00 night shading uses the configured timezone. VPD remains in the data exports but is not plotted.
 - `figures/maps.png` (and/or PDF): one combined figure with a row per selected timestamp and columns for temperature, RH, wind and accumulated precipitation. Four shared discrete colourbars apply to every row. Old individual timestamp figures from earlier runs are not removed automatically.
-- `figures/maps_interactive.html`: self-contained browser viewer. Regional and zoomed topography maps are shown first when available, followed by the time controls, then a wide point meteogram beside a column of four equally sized weather maps aligned with its equal-height temperature, humidity, wind and precipitation panels. `maps.interactive_map_layout` defaults to `column`; `2x2` and `row` are also available. Narrow screens stack the figures vertically. The time slider updates the weather-map frame and moves the vertical time marker on the meteogram. Clicking or dragging across the meteogram selects the nearest available map timestamp and synchronizes the slider; this also works with touch. Focus the meteogram and use arrow keys to step through frames, or Home/End to jump to the first/last frame. Selecting a time stops playback. In map-only mode there is no meteogram. If a shapefile overlay is configured, it is visible on the zoomed topography in the HTML as well. The embedded images are generated in memory, so `outputs.interactive: true` does not require `outputs.png: true`.
+- `figures/maps_interactive.html`: self-contained browser viewer. Regional and zoomed topography maps are shown first when available, followed by the time controls, then a wide point meteogram beside a column of four equally sized weather maps aligned with its equal-height temperature, humidity, wind and precipitation panels. `maps.interactive_map_layout` defaults to `column`; `2x2` and `row` are also available. Narrow screens stack the figures vertically. The time slider updates the weather-map frame and moves the vertical time marker on the meteogram. Clicking or dragging across the meteogram selects the nearest available map timestamp and synchronizes the slider; this also works with touch. Focus the meteogram and use arrow keys to step through frames, or Home/End to jump to the first/last frame. Selecting a time stops playback. In map-only mode there is no meteogram. If a shapefile overlay is configured, the HTML follows the same `maps.overlay.topography` and `maps.overlay.weather` settings as the static maps. The embedded images are generated in memory, so `outputs.interactive: true` does not require `outputs.png: true`.
 
 Map palettes approximate the supplied reference screenshots; explicit colours and boundaries are in `era5_fire/plotting.py`. Temperature bands span −48 to 56°C every 4°C. RH boundaries are 5, 10, 20, …, 100%, with brown below 5%. Temperature and RH use their end colours outside these ranges. Wind shading uses km/h: 0–10 is transparent, 10–20 pale yellow, then 10 km/h bands from yellow through green to dark blue; values at or above 90 use the darkest blue. Wind barbs also use km/h (half barb 5, full barb 10, pennant 50), as labelled on the figure. Meteogram wind arrows point in the direction of motion; exported wind values remain in m/s.
 
@@ -320,6 +327,6 @@ The automated tests create temporary configurations and outputs; they do not dow
 
 Topography uses [Copernicus GLO-90](https://registry.opendata.aws/copernicus-dem/), a digital surface model including vegetation and buildings, resampled for display. It does not change the ERA5 grid or weather values. Terrain tiles require internet access on first use; subsequent runs reuse the local topography cache.
 
-The regional topography uses the configured `region`. The zoomed topography uses the meteogram point and `maps.topography_zoom_radius_km`; longitude extent is adjusted for latitude so the requested radius is approximately symmetric in kilometres. Coastlines, borders, lakes and filtered Natural Earth city labels can be displayed using the same `maps.*` geographic-context options as the weather maps. An optional `maps.topography_overlay` shapefile is reprojected to EPSG:4326 and drawn only on the zoomed view as a highlight. It does not modify the DEM, ERA5 data, or zoom extent.
+The regional topography uses the configured `region`. The zoomed topography uses the meteogram point and `maps.topography_zoom_radius_km`; longitude extent is adjusted for latitude so the requested radius is approximately symmetric in kilometres. Coastlines, borders, lakes and filtered Natural Earth city labels can be displayed using the same `maps.*` geographic-context options as the weather maps. An optional `maps.overlay` shapefile is reprojected to EPSG:4326 and drawn on both topography views when `maps.overlay.topography: true`. Weather maps use the independent `maps.overlay.weather` switch. It does not modify the DEM, ERA5 data, or zoom extent.
 
 The generated `maps_interactive.html` remains self-contained: weather frames, meteogram and both topography images are embedded directly in the HTML, so the file can be opened locally in a normal web browser without a web server.

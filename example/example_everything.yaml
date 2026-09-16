@@ -38,8 +38,10 @@ maps:
   interactive_map_layout: column  # column, 2x2, or row
   interactive_meteogram: true
 
-  # Optional overlay on the zoomed topography:
-  topography_overlay:
+  # Optional shapefile overlay (select each map type):
+  overlay:
+    topography: true  # regional and zoomed topography
+    weather: true  # all weather panels
     path: geometry/geometry.shp
     edgecolor: "#d7191c"
     linewidth: 2.0

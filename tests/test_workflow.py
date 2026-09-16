@@ -210,3 +210,99 @@ def test_topography_panel(tmp_path, monkeypatch):
     assert fig.axes[0].get_legend().get_texts()[0].get_text() == "Meteogram location"
     assert fig.axes[1].get_ylabel() == "Elevation above sea level (m)"
     plt.close(fig)
+
+
+@pytest.mark.parametrize("terrain,weather", [(True, True), (True, False), (False, True), (False, False)])
+def test_overlay_map_scope(tmp_path, monkeypatch, terrain, weather):
+    import geopandas as gpd
+    from shapely.geometry import Polygon
+    from era5_fire.plotting import maps, topography, plt
+
+    shape = tmp_path / "perimeter.geojson"
+    gpd.GeoDataFrame(geometry=[Polygon([(12.5, 37.5), (13.5, 37.5),
+                                       (13.5, 38.5), (12.5, 38.5)])],
+                     crs="EPSG:4326").to_file(shape)
+    c = {"region": {"west": 12, "east": 14, "south": 37, "north": 39},
+         "maps": {"coastlines": False, "borders": False, "lakes": False,
+                  "cities": False, "overlay": {
+                      "path": shape, "topography": terrain, "weather": weather,
+                      "label": "Fire perimeter"}}}
+    monkeypatch.setattr("era5_fire.topography.elevation", lambda c, region=None: (
+        np.arange(100, dtype=float).reshape(10, 10), (12, 14, 37, 39)))
+    ds = derive(data(pd.date_range("2023-01-01", periods=1, freq="h")))
+    for layout in ("row", "column", "2x2"):
+        fig = maps(ds, c, cities=[], layout=layout)
+        assert bool(fig.legends) == weather
+        # Each panel has a mesh; the overlay adds a boundary collection.
+        for ax in fig.axes:
+            if hasattr(ax, "projection"):
+                boundaries = [a for a in ax.collections
+                              if type(a).__name__ == "LineCollection"]
+                assert bool(boundaries) == weather
+        plt.close(fig)
+    for zoom in (False, True):
+        fig = topography(c, region=c["region"] if zoom else None)
+        assert (fig.axes[0].get_legend() is not None) == terrain
+        plt.close(fig)
+
+
+def test_overlay_config_switches(tmp_path):
+    path = tmp_path / "case.yaml"
+    config = {"start": "2023-01-01", "end": "2023-01-02", "mode": "maps",
+              "region": {"west": 12, "east": 14, "south": 37, "north": 39},
+              "maps": {"overlay": {"topography": False, "weather": False, "path": "missing.shp"}}}
+    path.write_text(yaml.safe_dump(config))
+    assert load_config(path)["maps"]["overlay"]["weather"] is False
+    for key in ("topography", "weather"):
+        config["maps"]["overlay"] = {key: "true"}
+        path.write_text(yaml.safe_dump(config))
+        with pytest.raises(ValueError, match=key):
+            load_config(path)
+
+
+def test_overlay_geometry_reused_without_redraw(tmp_path, monkeypatch):
+    import cartopy.crs as ccrs
+    import geopandas as gpd
+    from shapely.geometry import Polygon, LineString, MultiPoint
+    from era5_fire.plotting import _plot_overlay, plt
+
+    shape = tmp_path / "overlay.geojson"
+    geometries = [
+        Polygon([(0, 0), (3, 0), (3, 3), (0, 3)],
+                holes=[[(1, 1), (2, 1), (2, 2), (1, 2)]]),
+        LineString([(0, 0), (3, 3)]), MultiPoint([(1, 1), (2, 2)]),
+    ]
+    gdf = gpd.GeoDataFrame(geometry=geometries, crs="EPSG:4326").to_crs("EPSG:3857")
+    gdf.to_file(shape)
+    original_read = gpd.read_file
+    reads = []
+
+    def read_file(path):
+        reads.append(path)
+        return original_read(path)
+
+    monkeypatch.setattr(gpd, "read_file", read_file)
+    c = {"maps": {"overlay": {"path": shape, "weather": True}}}
+    projection = ccrs.PlateCarree()
+    fig, axes = plt.subplots(1, 2, subplot_kw={"projection": projection})
+
+    def unexpected_draw(*args, **kwargs):
+        pytest.fail("Adding an overlay must not redraw the figure")
+
+    monkeypatch.setattr(fig.canvas, "draw_idle", unexpected_draw)
+    try:
+        for ax in axes:
+            ax.set_extent([-1, 4, -1, 4], crs=projection)
+            _plot_overlay(ax, c, (-1, 4, -1, 4), projection, "weather")
+            assert len(ax.collections[0].get_segments()) == 3  # exterior, hole, line
+            np.testing.assert_allclose(ax.collections[1].get_offsets(), [(1, 1), (2, 2)])
+        assert len(reads) == 1
+        # A different viewport reuses the reprojected source geometry too.
+        assert _plot_overlay(axes[0], c, (10, 11, 10, 11), projection, "weather") is None
+        assert len(reads) == 1
+        # Editing the source invalidates both cached data and prepared coordinates.
+        gdf.iloc[:1].to_file(shape)
+        _plot_overlay(axes[0], c, (-1, 4, -1, 4), projection, "weather")
+        assert len(reads) == 2
+    finally:
+        plt.close(fig)

@@ -167,7 +167,6 @@ def plot(c):
                 c,
                 region=zoom_region,
                 title=f"Topography — {radius_km:g} km radius around meteogram point",
-                overlay=True,
             )
             try:
                 if static_formats:

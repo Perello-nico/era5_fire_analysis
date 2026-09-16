@@ -28,3 +28,13 @@ maps:
   topography_zoom: false
   interactive_dpi: 110
   interactive_interval_ms: 900
+
+  # Optional shapefile overlay; enable when generating plots:
+  overlay:
+    topography: false
+    weather: false
+    path: geometry/geometry.shp
+    edgecolor: "#d7191c"
+    linewidth: 2.0
+    alpha: 1.0
+    label: Fire perimeter

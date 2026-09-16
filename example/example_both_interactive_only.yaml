@@ -37,3 +37,13 @@ maps:
   interactive_interval_ms: 900
   interactive_map_layout: column  # column, 2x2, or row
   interactive_meteogram: true
+
+  # Optional shapefile overlay; enable when generating plots:
+  overlay:
+    topography: false
+    weather: false
+    path: geometry/geometry.shp
+    edgecolor: "#d7191c"
+    linewidth: 2.0
+    alpha: 1.0
+    label: Fire perimeter

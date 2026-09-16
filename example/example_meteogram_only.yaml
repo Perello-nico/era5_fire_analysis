@@ -16,3 +16,5 @@ outputs:
   png: true
   pdf: false
   interactive: false
+
+# Shapefile overlays apply to maps only; see example_everything.yaml.
