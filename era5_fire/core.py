@@ -36,6 +36,25 @@ def load_config(path):
     c.setdefault("timezone", "UTC")
     ZoneInfo(c["timezone"])
 
+    event = c.get("event")
+    if event is not None:
+        if not isinstance(event, dict) or not event.get("start"):
+            raise ValueError("event must be a mapping with a start timestamp")
+        for key in ("start", "end"):
+            if key == "end" and event.get(key) is None:
+                continue
+            try:
+                value = pd.Timestamp(event[key])
+                if pd.isna(value):
+                    raise ValueError("missing timestamp")
+                event[key] = (value.tz_localize("UTC") if value.tzinfo is None
+                              else value.tz_convert("UTC"))
+            except (TypeError, ValueError) as error:
+                raise ValueError(f"event.{key} must be a valid timestamp") from error
+        if event.get("end") is not None and event["end"] < event["start"]:
+            raise ValueError("event.end must be on or after event.start")
+        event.setdefault("name", "Event")
+
     # Output selection.  New preferred syntax:
     #   outputs:
     #     png: true

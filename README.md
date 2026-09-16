@@ -330,3 +330,30 @@ Topography uses [Copernicus GLO-90](https://registry.opendata.aws/copernicus-dem
 The regional topography uses the configured `region`. The zoomed topography uses the meteogram point and `maps.topography_zoom_radius_km`; longitude extent is adjusted for latitude so the requested radius is approximately symmetric in kilometres. Coastlines, borders, lakes and filtered Natural Earth city labels can be displayed using the same `maps.*` geographic-context options as the weather maps. An optional `maps.overlay` shapefile is reprojected to EPSG:4326 and drawn on both topography views when `maps.overlay.topography: true`. Weather maps use the independent `maps.overlay.weather` switch. It does not modify the DEM, ERA5 data, or zoom extent.
 
 The generated `maps_interactive.html` remains self-contained: weather frames, meteogram and both topography images are embedded directly in the HTML, so the file can be opened locally in a normal web browser without a web server.
+
+
+### Event timing on meteograms
+
+An optional top-level `event` block marks an event independently of the `start`
+and `end` used to download data:
+
+```yaml
+event:
+  name: Fire event
+  start: "2023-07-24T14:30:00+02:00"
+  end: "2023-07-26T18:00:00+02:00"
+```
+
+Dashed vertical lines mark the event boundaries on all four meteogram panels.
+A thin shaded rectangle beneath the time axis shows the duration, with the event
+name inside, without covering the weather curves. These annotations appear in
+PNG/PDF meteograms and the meteogram embedded in interactive HTML; the moving
+time cursor remains separate.
+
+Event timestamps accept minutes and explicit UTC offsets and follow the configured
+`timezone` on the plot. Timestamps without an offset are interpreted as UTC.
+`start` is required when `event` is present; `end` is optional and must not precede
+it. Without `end`, only the start line is shown. The name defaults to `Event`.
+Boundaries outside the plotted time range are hidden and the duration strip is
+clipped to its visible overlap. Event settings do not change downloads or map
+frames. Omit the block to leave the meteogram unchanged.

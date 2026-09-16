@@ -2,6 +2,14 @@
 
 start: "2023-07-24T00:00:00Z"
 end: "2023-07-26T23:00:00Z"
+
+# Optional event annotations on meteograms; independent of the download period.
+# Omit end to draw only the start line. Naive timestamps are interpreted as UTC.
+# event:
+#   name: Fire event
+#   start: "2023-07-24T14:30:00+02:00"
+#   end: "2023-07-26T18:00:00+02:00"
+
 mode: both
 
 point:

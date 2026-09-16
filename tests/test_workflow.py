@@ -306,3 +306,52 @@ def test_overlay_geometry_reused_without_redraw(tmp_path, monkeypatch):
         assert len(reads) == 2
     finally:
         plt.close(fig)
+
+
+def test_event_config(tmp_path):
+    path = tmp_path / "event.yaml"
+    config = {"start": "2023-07-24", "end": "2023-07-26", "mode": "point",
+              "point": {"latitude": 38, "longitude": 13},
+              "event": {"start": "2023-07-24T14:30+02:00", "end": "2023-07-25T12:45Z"}}
+    path.write_text(yaml.safe_dump(config))
+    c = load_config(path)
+    assert c["event"]["start"] == pd.Timestamp("2023-07-24T12:30Z")
+    assert c["start"] == pd.Timestamp("2023-07-24T00:00Z")
+    for event in ({}, {"start": "bad"}, {"start": "2023-07-25", "end": "2023-07-24"}):
+        config["event"] = event
+        path.write_text(yaml.safe_dump(config))
+        with pytest.raises(ValueError, match="event"):
+            load_config(path)
+    config["event"] = {"start": "2023-07-24T12:30"}
+    path.write_text(yaml.safe_dump(config))
+    assert load_config(path)["event"]["start"] == pd.Timestamp("2023-07-24T12:30Z")
+
+
+@pytest.mark.parametrize("aligned", [False, True])
+@pytest.mark.parametrize("start,end,lines,strip", [
+    ("2023-07-24T02:30Z", "2023-07-24T16:45Z", 2, True),
+    ("2023-07-24T02:30Z", None, 1, False),
+    ("2023-07-23", "2023-07-25", 0, True),
+    ("2023-07-22", "2023-07-23", 0, False),
+])
+def test_event_meteogram(aligned, start, end, lines, strip):
+    from era5_fire.plotting import meteogram, plt
+    ds = derive(data(pd.date_range("2023-07-24", periods=24, freq="h"))).isel(latitude=1, longitude=1)
+    c = {"timezone": "Europe/Rome", "point": {"latitude": 38, "longitude": 13},
+         "event": {"start": start, "end": end, "name": "Fire event"}}
+    fig = meteogram(ds, c, aligned_maps=aligned)
+    try:
+        for ax in fig.axes[:4]:
+            assert sum(line.get_gid() in ("event-start", "event-end") for line in ax.lines) == lines
+        strips = [ax for ax in fig.axes if ax.get_label() == "event-strip"]
+        assert bool(strips) == strip
+        if strip:
+            assert strips[0].get_xlim() == fig.axes[3].get_xlim()
+            assert strips[0].get_position().y1 < fig.axes[3].get_position().y0
+            assert strips[0].texts[0].get_text() == "Fire event"
+        fig.canvas.draw()
+        if strip:
+            renderer = fig.canvas.get_renderer()
+            assert fig.legends[0].get_window_extent(renderer).y1 < strips[0].get_window_extent(renderer).y0
+    finally:
+        plt.close(fig)

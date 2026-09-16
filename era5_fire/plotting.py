@@ -50,6 +50,47 @@ def palette(variable):
     return cmap, BoundaryNorm(boundaries, cmap.N)
 
 
+def _plot_event(fig, axes, c):
+    """Mark event boundaries and place the duration strip below the time axis."""
+    event = c.get("event")
+    if not event:
+        return
+    color = "#b45309"
+    left, right = axes[-1].get_xlim()
+    boundaries = {}
+    for key in ("start", "end"):
+        if event.get(key) is None:
+            continue
+        value = pd.Timestamp(event[key])
+        value = value.tz_localize("UTC") if value.tzinfo is None else value
+        x = mdates.date2num(value)
+        boundaries[key] = x
+        if left <= x <= right:
+            for ax in axes:
+                ax.axvline(x, color=color, ls="--", lw=1.3, zorder=24,
+                           gid=f"event-{key}")
+            axes[0].annotate(
+                f"Event {key}", (x, .98), xycoords=("data", "axes fraction"),
+                xytext=(4 if key == "start" else -4, -2),
+                textcoords="offset points", ha="left" if key == "start" else "right",
+                va="top", fontsize=8, color=color,
+                bbox={"facecolor": "white", "alpha": .8, "edgecolor": "none", "pad": 1},
+            )
+    if "end" not in boundaries:
+        return
+    start, end = max(left, boundaries["start"]), min(right, boundaries["end"])
+    if start >= end:
+        return
+    position = axes[-1].get_position()
+    strip = fig.add_axes([position.x0, .078, position.width, .025], label="event-strip")
+    strip.set_xlim(left, right)
+    strip.set_ylim(0, 1)
+    strip.set_axis_off()
+    strip.axvspan(start, end, facecolor=color, alpha=.22, linewidth=0)
+    strip.text((start + end) / 2, .5, str(event.get("name", "Event")),
+               ha="center", va="center", fontsize=8, color=color, clip_on=True)
+
+
 def meteogram(ds, c, highlight_time=None, *, aligned_maps=False):
     """Four panels: T/Td, RH, wind/gust/direction, and precipitation.
 
@@ -206,6 +247,8 @@ def meteogram(ds, c, highlight_time=None, *, aligned_maps=False):
     )
     axes[-1].set_xlabel(f"Time ({c['timezone']})")
 
+    _plot_event(fig, axes, c)
+
     # One common legend for all meteogram panels.
     handles, labels = [], []
     for ax in [axes[0], axes[1], axes[2], axes[3], accumulated_rain]:
@@ -217,7 +260,7 @@ def meteogram(ds, c, highlight_time=None, *, aligned_maps=False):
         handles, labels,
         loc="lower center",
         bbox_to_anchor=(.5, .01),
-        ncol=3,
+        ncol=4 if c.get("event") else 3,
         frameon=False,
     )
 
